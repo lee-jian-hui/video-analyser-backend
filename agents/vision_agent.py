@@ -7,6 +7,10 @@ from llm import get_model
 from utils.tool_discovery import ToolDiscovery
 from configs import Config
 from templates.vision_agent_prompts import VisionAgentPrompts
+from langchain.messages import HumanMessage, ToolMessage
+from utils.logger import get_logger
+from ultralytics import YOLO
+import cv2
 
 
 # Define tools for video processing
@@ -14,11 +18,11 @@ from templates.vision_agent_prompts import VisionAgentPrompts
 def detect_objects_in_video(video_path: str, confidence_threshold: float = 0.5, model_size: str = "yolov8n") -> str:
     """Detect objects in video using local YOLO model"""
     try:
-        from ultralytics import YOLO
-        import cv2
 
-        # Load YOLO model (downloads on first use)
-        model = YOLO(f'{model_size}.pt')
+        # Load YOLO model using model manager
+        from ai_model_manager import get_model_manager
+        model_manager = get_model_manager()
+        model = model_manager.get_yolo_model(f'{model_size}.pt')
 
         # Open video
         cap = cv2.VideoCapture(video_path)
@@ -143,8 +147,6 @@ class VisionAgent(BaseAgent):
 
     def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name, execution_mode: str, file_path: str = "") -> MessagesState:
         """Process vision-related tasks with tools"""
-        from langchain.messages import HumanMessage, ToolMessage
-        from utils.logger import get_logger
 
         logger = get_logger(__name__)
         content = state["messages"][-1].content

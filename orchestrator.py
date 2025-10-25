@@ -30,24 +30,42 @@ class OrchestratorState(TypedDict):
 class MultiStageOrchestrator:
     """Multi-stage LLM orchestration using LangGraph"""
 
-    def __init__(self):
+    def __init__(self, agents=None):
         self.logger = get_logger(__name__)
         self.logger.info("Initializing MultiStageOrchestrator")
         self.model = get_model(Config.GEMINI_API_KEY)
         self.coordinator = MultiAgentCoordinator()
-        self._setup_agents()
+
+        # Register provided agents or use default setup
+        if agents:
+            self._register_agents(agents)
+        else:
+            self._setup_default_agents()
+
         self.workflow = self._build_workflow()
         self.logger.info("MultiStageOrchestrator initialized successfully")
 
-    def _setup_agents(self):
-        """Initialize and register all agents"""
-        from agents.vision_agent import VisionAgent
-        from agents.transcription_agent import TranscriptionAgent
-        from agents.generation_agent import GenerationAgent
+    def _register_agents(self, agents):
+        """Register provided agent instances"""
+        self.logger.info(f"Registering {len(agents)} provided agents")
 
-        self.coordinator.register_agent(VisionAgent())
-        # self.coordinator.register_agent(TranscriptionAgent())
-        # self.coordinator.register_agent(GenerationAgent())
+        for agent in agents:
+            try:
+                self.coordinator.register_agent(agent)
+                self.logger.info(f"Successfully registered agent: {agent.name}")
+            except Exception as e:
+                self.logger.error(f"Failed to register agent {getattr(agent, 'name', 'unknown')}: {e}")
+
+    def _setup_default_agents(self):
+        """Setup default agents (fallback when no agents provided)"""
+        self.logger.info("Setting up default agents")
+
+        try:
+            from agents.vision_agent import VisionAgent
+            self.coordinator.register_agent(VisionAgent())
+            self.logger.info("Successfully registered default VisionAgent")
+        except Exception as e:
+            self.logger.error(f"Failed to register default VisionAgent: {e}")
 
     def _build_workflow(self) -> StateGraph:
         """Build the multi-stage orchestration workflow (stategraph)"""

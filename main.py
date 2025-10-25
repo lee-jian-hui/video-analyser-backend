@@ -14,6 +14,10 @@ from orchestrator import MultiStageOrchestrator
 from utils.logger import get_logger
 from models.task_models import VideoTask, TaskRequest
 
+# Import agents to register
+from agents.vision_agent import VisionAgent
+from agents.transcription_agent import TranscriptionAgent
+
 load_dotenv()
 
 def initialize_model():
@@ -124,8 +128,15 @@ def run():
 
     logger = get_logger(__name__)
 
-    # Initialize the orchestrator
-    orchestrator = MultiStageOrchestrator()
+    # Create agent instances
+    agents = [
+        VisionAgent(),
+        TranscriptionAgent(),
+        # Add more agents here as needed
+    ]
+
+    # Initialize the orchestrator with agents
+    orchestrator = MultiStageOrchestrator(agents=agents)
 
     logger.info("🚀 Multi-Stage LLM Orchestrator initialized!")
     logger.info(f"Available agents: {list(orchestrator.coordinator.get_available_agents().keys())}")

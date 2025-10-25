@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -8,6 +9,34 @@ load_dotenv()
 
 class Config:
     """Centralized configuration management"""
+
+    # fetch or downloads cached ml models at this directory
+    @staticmethod
+    def get_ml_model_cache_dir() -> str:
+        """Get appropriate ML model cache directory based on environment"""
+        # Check if we're in a bundled/production environment
+        if getattr(sys, 'frozen', False) or os.getenv("TAURI_ENV"):
+            # Bundled app - use bundled models directory (read-only)
+            import sys
+            from pathlib import Path
+            if getattr(sys, 'frozen', False):
+                # PyInstaller bundle
+                bundle_dir = Path(sys._MEIPASS) / "ml-models"
+            else:
+                # Tauri bundle - models are in resources directory
+                # Tauri puts resources next to the executable
+                import os
+                exe_dir = Path(os.path.dirname(sys.executable))
+                bundle_dir = exe_dir / "ml-models"
+
+            print(f"Using bundled models at {str(bundle_dir)}")
+            return str(bundle_dir)
+
+        else:
+            # Development - use local directory
+            return os.getenv("ML_MODEL_CACHE_DIR", "./ml-models")
+
+    ML_MODEL_CACHE_DIR: str = get_ml_model_cache_dir()
 
     # API Keys
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
@@ -37,6 +66,7 @@ class Config:
     # Orchestrator Configuration
     ENABLE_WORKFLOW_VISUALIZATION: bool = os.getenv("ENABLE_WORKFLOW_VISUALIZATION", "true").lower() == "true"
     ORCHESTRATOR_TIMEOUT: int = int(os.getenv("ORCHESTRATOR_TIMEOUT", "300"))
+
 
     @classmethod
     def validate(cls) -> bool:
@@ -76,6 +106,7 @@ class Config:
             "ocr_language": cls.OCR_LANGUAGE,
             "sample_interval": cls.VIDEO_SAMPLE_INTERVAL
         }
+
 
     @classmethod
     def print_config(cls):
