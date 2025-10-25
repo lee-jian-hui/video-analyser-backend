@@ -3,34 +3,49 @@ Application startup module - initializes all AI models on first run
 """
 
 import logging
+from agent_manager import get_agent_manager
 from ai_model_manager import initialize_models, get_model_manager
 from utils.logger import get_logger
 
 
 def startup_initialization():
     """
-    Run this at application startup to ensure all models are downloaded and ready.
-    Returns True if successful, False if critical models failed to load.
+    Run this at application startup for health checks and agent setup.
+    Downloads models if needed and checks which services are available.
     """
     logger = get_logger(__name__)
     logger.info("Starting application initialization...")
 
-    # Initialize all models
+    # Get agent manager
+    agent_manager = get_agent_manager()
+
+    # Download models if needed (for bundling or first run)
+    logger.info("Ensuring models are downloaded...")
     model_status = initialize_models()
 
+    # Run health checks
+    logger.info("Running health checks...")
+    health_status = agent_manager.startup_health_check()
+
     # Log results
-    for model_type, success in model_status.items():
-        if success:
-            logger.info(f"✓ {model_type} model initialized successfully")
-        else:
-            logger.error(f"✗ {model_type} model failed to initialize")
+    logger.info("=== Model Health Status ===")
+    for model_type, healthy in health_status.items():
+        status = "✓ HEALTHY" if healthy else "✗ UNAVAILABLE"
+        logger.info(f"  {model_type}: {status}")
 
-    # Check if critical models loaded
-    critical_models = ["whisper", "yolo"]
-    failed_critical = [model for model in critical_models if not model_status.get(model, False)]
+    # Log agent availability
+    logger.info("=== Agent Availability ===")
+    agent_status = agent_manager.get_agent_status()
+    for agent_name, status in agent_status.items():
+        agent_state = status['status'].upper()
+        deps = ', '.join(status['dependencies'])
+        logger.info(f"  {agent_name}: {agent_state} (deps: {deps})")
 
-    if failed_critical:
-        logger.error(f"Critical models failed: {failed_critical}")
+    available_agents = agent_manager.get_available_agents()
+    logger.info(f"Available agents: {available_agents}")
+
+    if not available_agents:
+        logger.error("No agents available! Check model dependencies.")
         return False
 
     logger.info("Application initialization complete!")
