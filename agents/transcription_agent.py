@@ -162,8 +162,9 @@ class TranscriptionAgent(BaseAgent):
         )
 
         try:
-            # Start with the prompt
-            current_messages = state["messages"] + [HumanMessage(content=prompt)]
+            # Ensure proper message role alternation for ChatHuggingFace
+            # Start fresh with just the task prompt as a user message
+            current_messages = [HumanMessage(content=prompt)]
             llm_calls = 0
             max_iterations = 3  # Transcription is usually simpler
 

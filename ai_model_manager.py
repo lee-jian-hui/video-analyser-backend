@@ -159,8 +159,8 @@ class AIModelManager:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 cache_dir=str(cache_dir),
-                dtype="auto",
-                device_map="cpu",
+                dtype=Config.TORCH_DTYPE,
+                device_map=Config.DEVICE_MAP,
                 local_files_only=False
             )
 
@@ -194,8 +194,8 @@ class AIModelManager:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 cache_dir=str(cache_dir),
-                dtype="auto",
-                device_map="cpu",
+                dtype=Config.TORCH_DTYPE,
+                device_map=Config.DEVICE_MAP,
                 local_files_only=False
             )
 

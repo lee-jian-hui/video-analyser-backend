@@ -48,12 +48,13 @@ def _get_local_llm() -> BaseChatModel:
         model = components["model"]
         tokenizer = components["tokenizer"]
 
-        # Create text generation pipeline
+        # Create text generation pipeline with config
+        print(f"Creating {model_name} pipeline with max_tokens={Config.MAX_NEW_TOKENS}")
         text_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=512,
+            max_new_tokens=Config.MAX_NEW_TOKENS,
             temperature=0.7,
             do_sample=True,
             return_full_text=False

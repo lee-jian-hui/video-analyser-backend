@@ -56,6 +56,16 @@ class Config:
     MODEL_NAME: str = os.getenv("MODEL_NAME", "gemini-2.0-flash-lite")
     MODEL_TEMPERATURE: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
 
+    # Local Model Hardware Configuration
+    DEVICE_MAP: str = os.getenv("DEVICE_MAP", "cpu")  # "cpu", "auto", "cuda", etc.
+    TORCH_DTYPE: str = os.getenv("TORCH_DTYPE", "auto")  # "auto", "float16", "float32"
+    MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "512"))
+    INFERENCE_TIMEOUT: int = int(os.getenv("INFERENCE_TIMEOUT", "720"))  # seconds
+
+    # HuggingFace Offline Configuration
+    HF_HUB_OFFLINE: bool = os.getenv("HF_HUB_OFFLINE", "false").lower() == "true"
+    TRANSFORMERS_OFFLINE: bool = os.getenv("TRANSFORMERS_OFFLINE", "false").lower() == "true"
+
     # Agent Configuration
     DEFAULT_EXECUTION_MODE: str = os.getenv("DEFAULT_EXECUTION_MODE", "single")
     MAX_LLM_CALLS: int = int(os.getenv("MAX_LLM_CALLS", "10"))
