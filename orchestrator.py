@@ -2,7 +2,7 @@ from typing import Dict, Any, List, Literal, Union
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from graph import MessagesState
-from llm import get_model
+from llm import get_llm_model
 from multi_agent_coordinator import MultiAgentCoordinator
 from models.orchestrator_models import AgentResult, OrchestrationResult
 from models.task_models import TaskRequest, VideoTask, ImageTask, TextTask
@@ -33,7 +33,7 @@ class MultiStageOrchestrator:
     def __init__(self, agents=None):
         self.logger = get_logger(__name__)
         self.logger.info("Initializing MultiStageOrchestrator")
-        self.model = get_model(Config.GEMINI_API_KEY)
+        self.model = get_llm_model()
         self.coordinator = MultiAgentCoordinator()
 
         # Register provided agents or use default setup

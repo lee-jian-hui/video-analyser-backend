@@ -2,7 +2,7 @@ from typing import Dict, Any, List
 from .base_agent import BaseAgent
 from graph import MessagesState
 from langchain.messages import AIMessage
-from llm import get_model
+from llm import get_llm_model
 import os
 
 
@@ -14,7 +14,7 @@ class GenerationAgent(BaseAgent):
             name="generation_agent",
             capabilities=["pdf_generation", "powerpoint_generation", "document_creation", "summary_generation"]
         )
-        self.model = get_model(os.getenv("GEMINI_API_KEY"))
+        self.model = get_llm_model(os.getenv("GEMINI_API_KEY"))
 
     def can_handle(self, task: Dict[str, Any]) -> bool:
         """Check if this agent can handle the task"""

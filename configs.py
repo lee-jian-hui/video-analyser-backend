@@ -14,18 +14,18 @@ class Config:
     @staticmethod
     def get_ml_model_cache_dir() -> str:
         """Get appropriate ML model cache directory based on environment"""
+        import sys
+        from pathlib import Path
+
         # Check if we're in a bundled/production environment
         if getattr(sys, 'frozen', False) or os.getenv("TAURI_ENV"):
             # Bundled app - use bundled models directory (read-only)
-            import sys
-            from pathlib import Path
             if getattr(sys, 'frozen', False):
                 # PyInstaller bundle
                 bundle_dir = Path(sys._MEIPASS) / "ml-models"
             else:
                 # Tauri bundle - models are in resources directory
                 # Tauri puts resources next to the executable
-                import os
                 exe_dir = Path(os.path.dirname(sys.executable))
                 bundle_dir = exe_dir / "ml-models"
 
@@ -50,6 +50,8 @@ class Config:
     )
 
     # Model Configuration
+    USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+    LOCAL_MODEL_TYPE: str = os.getenv("LOCAL_MODEL_TYPE", "llama")  # "llama" or "codellama"
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER", "google_genai")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "gemini-2.0-flash-lite")
     MODEL_TEMPERATURE: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))

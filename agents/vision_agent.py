@@ -3,7 +3,7 @@ from .base_agent import BaseAgent
 from graph import MessagesState
 from langchain.messages import AIMessage
 from langchain.tools import tool
-from llm import get_model
+from llm import get_llm_model
 from utils.tool_discovery import ToolDiscovery
 from configs import Config
 from templates.vision_agent_prompts import VisionAgentPrompts
@@ -128,7 +128,7 @@ class VisionAgent(BaseAgent):
             name="vision_agent",
             capabilities=["object_recognition", "image_captioning", "text_extraction", "graph_extraction", "ocr"]
         )
-        self.model = get_model(Config.GEMINI_API_KEY)
+        self.model = get_llm_model()
         # Define tools directly for this agent
         self.tools = [detect_objects_in_video, extract_text_from_video]
 

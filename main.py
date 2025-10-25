@@ -9,7 +9,7 @@ import os
 
 from graph import MessagesState
 from tools import inject_llm_tools
-from llm import get_model
+from llm import get_llm_model
 from orchestrator import MultiStageOrchestrator
 from utils.logger import get_logger
 from models.task_models import VideoTask, TaskRequest
@@ -22,7 +22,7 @@ load_dotenv()
 
 def initialize_model():
     """Initialize model with tools using the provided API key"""
-    model = get_model(os.getenv("GEMINI_API_KEY"))
+    model = get_llm_model(os.getenv("GEMINI_API_KEY"))
     return inject_llm_tools(model)
 
 

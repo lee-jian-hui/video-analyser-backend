@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from langchain.messages import AIMessage, HumanMessage, ToolMessage
-from llm import get_model
+from llm import get_llm_model
 from configs import Config
 from langchain.tools import tool
 
@@ -87,7 +87,7 @@ class TranscriptionAgent(BaseAgent):
             name="transcription_agent",
             capabilities=["speech_to_text", "audio_processing", "transcription"]
         )
-        self.model = get_model(Config.GEMINI_API_KEY)
+        self.model = get_llm_model()
         # Define tools directly for this agent
         self.tools = [video_to_transcript]
 
