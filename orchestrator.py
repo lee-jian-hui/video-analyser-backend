@@ -1,10 +1,11 @@
-from typing import Dict, Any, List, Literal
+from typing import Dict, Any, List, Literal, Union
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from graph import MessagesState
 from llm import get_model
 from multi_agent_coordinator import MultiAgentCoordinator
-from models.orchestrator_models import TaskRequest, AgentResult, OrchestrationResult
+from models.orchestrator_models import AgentResult, OrchestrationResult
+from models.task_models import TaskRequest, VideoTask, ImageTask, TextTask
 from templates.orchestrator_prompts import OrchestratorPrompts, PromptExamples
 from utils.logger import get_logger
 from configs import Config
@@ -13,12 +14,12 @@ import os
 import json
 import re
 
-
 class OrchestratorState(TypedDict):
+
     """TypedDict for LangGraph state management"""
     messages: List[Any]
     llm_calls: int
-    original_task: str
+    task_request: TaskRequest
     selected_agents: List[str]
     execution_plans: Dict[str, List[str]]
     agent_results: Dict[str, Any]
@@ -91,7 +92,7 @@ class MultiStageOrchestrator:
         formatted_prompt = prompt_template.format(
             available_agents=list(available_agents_dict.keys()),
             agent_capabilities=available_agents,
-            user_request=state['original_task']
+            user_request=state['task_request'].task.get_task_description()
         )
 
         response = self.model.invoke([HumanMessage(content=formatted_prompt)])
@@ -144,7 +145,7 @@ class MultiStageOrchestrator:
                 agent_name=agent_name,
                 tool_names=tool_names,
                 tool_descriptions=tool_descriptions,
-                user_request=state['original_task'],
+                user_request=state['task_request'].task.get_task_description(),
                 agent_role=f"Handles {', '.join(agent.capabilities)}"
             )
 
@@ -186,15 +187,12 @@ class MultiStageOrchestrator:
         planned_tools = state["execution_plans"][current_agent_name]
         self.logger.debug(f"Executing {current_agent_name} with tools: {planned_tools}")
 
-        # Create a request for the agent
-        request = {
-            "task_type": current_agent_name.replace("_agent", ""),
-            "content": f"{state['original_task']} - Use these tools in order: {planned_tools}"
-        }
-        self.logger.debug(f"Request: {request}")
-
-        # Execute through coordinator
-        result = self.coordinator.process_request(request, execution_mode="chain")
+        # Execute through coordinator with the task request
+        result = self.coordinator.process_task_request(
+            state['task_request'],
+            agent_name=current_agent_name,
+            planned_tools=planned_tools
+        )
         self.logger.debug(f"Agent execution result: {result}")
 
         # Store result
@@ -223,7 +221,7 @@ class MultiStageOrchestrator:
         # Use template
         prompt_template = OrchestratorPrompts.RESULT_AGGREGATOR
         formatted_prompt = prompt_template.format(
-            original_task=state['original_task'],
+            original_task=state['task_request'].task.get_task_description(),
             agent_results=json.dumps(state['agent_results'], indent=2)
         )
 
@@ -236,12 +234,23 @@ class MultiStageOrchestrator:
             ]
         }
 
-    def process_task(self, task: str) -> Dict[str, Any]:
+    def process_task(self, task_request: Union[TaskRequest, str], file_path: str = None) -> Dict[str, Any]:
         """Main entry point for processing a task"""
+        # Handle backward compatibility - convert string to TaskRequest
+        if isinstance(task_request, str):
+            from models.task_models import VideoTask
+            task_request = TaskRequest(
+                task=VideoTask(
+                    description=task_request,
+                    file_path=file_path or "./sample.mp4",
+                    task_type="object_detection"
+                )
+            )
+
         initial_state = {
-            "messages": [HumanMessage(content=task)],
+            "messages": [HumanMessage(content=task_request.task.description)],
             "llm_calls": 0,
-            "original_task": task,
+            "task_request": task_request,
             "selected_agents": [],
             "execution_plans": {},
             "agent_results": {},
@@ -254,7 +263,7 @@ class MultiStageOrchestrator:
 
         return {
             "success": True,
-            "task": task,
+            "task_request": result["task_request"],
             "selected_agents": result["selected_agents"],
             "execution_plans": result["execution_plans"],
             "agent_results": result["agent_results"],

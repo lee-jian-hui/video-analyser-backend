@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from graph import MessagesState
 from langchain.messages import AIMessage
@@ -6,6 +6,7 @@ from langchain.tools import tool
 from llm import get_model
 from utils.tool_discovery import ToolDiscovery
 from configs import Config
+from templates.vision_agent_prompts import VisionAgentPrompts
 
 
 # Define tools for video processing
@@ -140,7 +141,7 @@ class VisionAgent(BaseAgent):
         """Get the model instance for this agent"""
         return self.model
 
-    def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name, execution_mode: str) -> MessagesState:
+    def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name, execution_mode: str, file_path: str = "") -> MessagesState:
         """Process vision-related tasks with tools"""
         from langchain.messages import HumanMessage, ToolMessage
         from utils.logger import get_logger
@@ -148,17 +149,17 @@ class VisionAgent(BaseAgent):
         logger = get_logger(__name__)
         content = state["messages"][-1].content
 
-        # Get available tool names and descriptions
-        available_tools = [tool.name for tool in self.get_tools()]
+        # Get available tool descriptions
         tool_descriptions = {tool.name: tool.description for tool in self.get_tools()}
 
-        prompt = f"""You are a vision analysis agent with access to these tools:
-{chr(10).join([f"- {name}: {desc}" for name, desc in tool_descriptions.items()])}
+        # Format tool descriptions for the prompt
+        formatted_tools = "\n".join([f"- {name}: {desc}" for name, desc in tool_descriptions.items()])
 
-Task: {content}
-
-Use the appropriate tools to handle the vision task. Call the relevant tool functions directly.
-"""
+        # Use template prompt
+        prompt = VisionAgentPrompts.format_tool_execution_prompt(
+            tool_descriptions=formatted_tools,
+            task_content=content
+        )
 
         try:
             # Start with the prompt
@@ -201,8 +202,11 @@ Use the appropriate tools to handle the vision task. Call the relevant tool func
 
                             except Exception as tool_error:
                                 logger.error(f"Tool execution error: {tool_error}")
+                                error_content = VisionAgentPrompts.format_error_response(
+                                    error_message=f"Error executing {tool_name}: {str(tool_error)}"
+                                )
                                 error_message = ToolMessage(
-                                    content=f"Error executing {tool_name}: {str(tool_error)}",
+                                    content=error_content,
                                     tool_call_id=tool_call["id"]
                                 )
                                 current_messages.append(error_message)
@@ -230,7 +234,124 @@ Use the appropriate tools to handle the vision task. Call the relevant tool func
 
         except Exception as e:
             logger.error(f"Vision agent processing error: {e}")
-            error_message = AIMessage(content=f"Vision Agent Error: {str(e)}")
+            error_content = VisionAgentPrompts.format_error_response(
+                error_message=f"Vision agent processing error: {str(e)}"
+            )
+            error_message = AIMessage(content=error_content)
+            return {
+                "messages": state["messages"] + [error_message],
+                "llm_calls": state.get("llm_calls", 0)
+            }
+
+    def _process_task_request(self, state: MessagesState, model_with_tools, tools_by_name, task_request, execution_mode: str, planned_tools: Optional[List[str]] = None) -> MessagesState:
+        """Process vision tasks using TaskRequest model"""
+        from langchain.messages import HumanMessage, ToolMessage
+        from utils.logger import get_logger
+
+        logger = get_logger(__name__)
+
+        # Extract task information
+        task = task_request.task
+        task_description = task.get_task_description()
+
+        # Get available tool descriptions
+        tool_descriptions = {tool.name: tool.description for tool in self.get_tools()}
+
+        # Format tool descriptions for the prompt
+        formatted_tools = "\n".join([f"- {name}: {desc}" for name, desc in tool_descriptions.items()])
+
+        # Add file path context
+        file_path_context = f"File to process: {task.file_path}" if hasattr(task, 'file_path') else ""
+
+        # Use template prompt
+        prompt = VisionAgentPrompts.format_tool_execution_prompt(
+            tool_descriptions=formatted_tools,
+            task_content=task_description,
+            file_path_context=file_path_context
+        )
+
+        try:
+            # Start with the prompt
+            current_messages = state["messages"] + [HumanMessage(content=prompt)]
+            llm_calls = 0
+            max_iterations = 5  # Prevent infinite loops
+
+            for iteration in range(max_iterations):
+                logger.debug(f"Vision agent iteration {iteration + 1}")
+
+                # Invoke the model
+                response = model_with_tools.invoke(current_messages)
+                current_messages.append(response)
+                llm_calls += 1
+
+                logger.debug(f"Model response: {response.content}")
+                logger.debug(f"Tool calls: {getattr(response, 'tool_calls', [])}")
+
+                # Check if the model made tool calls
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    # Process each tool call
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+
+                        # Use the file path from the task if video_path is not provided
+                        if tool_name in ["detect_objects_in_video", "extract_text_from_video"]:
+                            if "video_path" not in tool_args and hasattr(task, 'file_path'):
+                                tool_args["video_path"] = task.file_path
+
+                        logger.debug(f"Calling tool: {tool_name} with args: {tool_args}")
+
+                        if tool_name in tools_by_name:
+                            try:
+                                # Execute the tool
+                                tool_result = tools_by_name[tool_name].invoke(tool_args)
+                                logger.debug(f"Tool result: {tool_result}")
+
+                                # Add tool result to messages
+                                tool_message = ToolMessage(
+                                    content=str(tool_result),
+                                    tool_call_id=tool_call["id"]
+                                )
+                                current_messages.append(tool_message)
+
+                            except Exception as tool_error:
+                                logger.error(f"Tool execution error: {tool_error}")
+                                error_content = VisionAgentPrompts.format_error_response(
+                                    error_message=f"Error executing {tool_name}: {str(tool_error)}"
+                                )
+                                error_message = ToolMessage(
+                                    content=error_content,
+                                    tool_call_id=tool_call["id"]
+                                )
+                                current_messages.append(error_message)
+                        else:
+                            logger.warning(f"Unknown tool: {tool_name}")
+                            error_message = ToolMessage(
+                                content=f"Unknown tool: {tool_name}",
+                                tool_call_id=tool_call["id"]
+                            )
+                            current_messages.append(error_message)
+
+                    # Continue the conversation if in chain mode
+                    if execution_mode == "chain":
+                        continue
+                    else:
+                        break
+                else:
+                    # No more tool calls, we're done
+                    break
+
+            return {
+                "messages": current_messages,
+                "llm_calls": state.get("llm_calls", 0) + llm_calls
+            }
+
+        except Exception as e:
+            logger.error(f"Vision agent processing error: {e}")
+            error_content = VisionAgentPrompts.format_error_response(
+                error_message=f"Vision agent processing error: {str(e)}"
+            )
+            error_message = AIMessage(content=error_content)
             return {
                 "messages": state["messages"] + [error_message],
                 "llm_calls": state.get("llm_calls", 0)

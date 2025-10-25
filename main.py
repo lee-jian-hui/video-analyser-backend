@@ -12,6 +12,7 @@ from tools import inject_llm_tools
 from llm import get_model
 from orchestrator import MultiStageOrchestrator
 from utils.logger import get_logger
+from models.task_models import VideoTask, TaskRequest
 
 load_dotenv()
 
@@ -129,16 +130,33 @@ def run():
     logger.info("🚀 Multi-Stage LLM Orchestrator initialized!")
     logger.info(f"Available agents: {list(orchestrator.coordinator.get_available_agents().keys())}")
 
-    # Example: Complex video analysis task
-    task = "Analyze this video file at /path/to/meeting.mp4 - ONLY detect what objects are in the video"
-    # task = "Analyze this video file at /path/to/meeting.mp4 - detect all people and objects and tell me what are they"
-    # task = "Analyze this video file at /path/to/meeting.mp4 - detect all people and objects, extract any text or slides shown, transcribe the audio, and create a comprehensive PDF summary report"
+    # Create a VideoTask using Pydantic model
+    video_task = VideoTask(
+        description="Detect what objects are in the video",
+        file_path="./sample.mp4",
+        task_type="object_detection",
+        output_format="summary",
+        confidence_threshold=0.5
+    )
 
-    logger.info(f"\n📋 Processing task: {task}")
+    # Wrap in TaskRequest
+    task_request = TaskRequest(
+        task=video_task,
+        execution_mode="chain"
+    )
+
+    # Alternative tasks (commented out):
+    # VideoTask(description="Detect all people and objects and tell me what they are", file_path="./sample.mp4", task_type="object_detection")
+    # VideoTask(description="Comprehensive analysis with objects and text", file_path="./sample.mp4", task_type="comprehensive_analysis")
+
+    logger.info(f"\n📋 Processing task: {video_task.get_task_description()}")
+    logger.info(f"📁 File path: {video_task.file_path}")
+    logger.info(f"🎯 Task type: {video_task.task_type}")
+    logger.info(f"⚙️ Execution mode: {task_request.execution_mode}")
     logger.info("\n" + "="*80)
 
     # Process through multi-stage orchestration
-    result = orchestrator.process_task(task)
+    result = orchestrator.process_task(task_request)
 
     logger.info("\n📊 ORCHESTRATION RESULTS:")
     logger.info("="*80)
