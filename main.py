@@ -10,6 +10,8 @@ import os
 from graph import MessagesState
 from tools import inject_llm_tools
 from llm import get_model
+from orchestrator import MultiStageOrchestrator
+from utils.logger import get_logger
 
 load_dotenv()
 
@@ -55,8 +57,6 @@ def create_tool_node(tools_by_name):
 
 
 
-
-
 def should_continue(state: MessagesState) -> Literal["tool_node", END]:
     """Decide if we should continue the loop or stop based upon whether the LLM made a tool call"""
 
@@ -72,7 +72,7 @@ def should_continue(state: MessagesState) -> Literal["tool_node", END]:
 
 
 
-def run():
+def old_run():
     # Initialize model with tools
     model_with_tools, tools_by_name = initialize_model()
 
@@ -110,6 +110,51 @@ def run():
     result = agent.invoke({"messages": messages})
     for m in result["messages"]:
         m.pretty_print()
+
+
+
+
+
+def run():
+    """New multi-stage orchestration entry point"""
+    # Set up debug logging
+    from utils.logger import setup_logging
+    setup_logging(level="DEBUG")
+
+    logger = get_logger(__name__)
+
+    # Initialize the orchestrator
+    orchestrator = MultiStageOrchestrator()
+
+    logger.info("🚀 Multi-Stage LLM Orchestrator initialized!")
+    logger.info(f"Available agents: {list(orchestrator.coordinator.get_available_agents().keys())}")
+
+    # Example: Complex video analysis task
+    task = "Analyze this video file at /path/to/meeting.mp4 - ONLY detect what objects are in the video"
+    # task = "Analyze this video file at /path/to/meeting.mp4 - detect all people and objects and tell me what are they"
+    # task = "Analyze this video file at /path/to/meeting.mp4 - detect all people and objects, extract any text or slides shown, transcribe the audio, and create a comprehensive PDF summary report"
+
+    logger.info(f"\n📋 Processing task: {task}")
+    logger.info("\n" + "="*80)
+
+    # Process through multi-stage orchestration
+    result = orchestrator.process_task(task)
+
+    logger.info("\n📊 ORCHESTRATION RESULTS:")
+    logger.info("="*80)
+    logger.info(f"✅ Success: {result['success']}")
+    logger.info(f"🤖 Selected Agents: {result['selected_agents']}")
+    logger.info(f"🛠️  Execution Plans: {result['execution_plans']}")
+    logger.info(f"🧠 Total LLM Calls: {result['total_llm_calls']}")
+    logger.info(f"\n📄 Final Result:\n{result['final_result']}")
+
+    # Show workflow visualization
+    try:
+        from IPython.display import Image, display
+        logger.info("\n📈 Workflow Visualization:")
+        display(Image(orchestrator.workflow.get_graph().draw_mermaid_png()))
+    except:
+        logger.warning("Workflow visualization not available")
 
 if __name__ == "__main__":
     run()

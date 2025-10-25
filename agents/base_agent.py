@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
-from langchain.messages import BaseMessage
 from graph import MessagesState
 
 
@@ -16,17 +15,17 @@ class BaseAgent(ABC):
         """Determine if this agent can handle the given task"""
         pass
 
-    def process(self, state: MessagesState) -> MessagesState:
+    def process(self, state: MessagesState, execution_mode: str = "single") -> MessagesState:
         """Process the task and return updated state"""
         # Get agent-specific tools and bind them to the model
         from tools import inject_llm_tools
         model_with_tools, tools_by_name = inject_llm_tools(self.get_model(), self.get_tools())
 
         # Process with the agent's specific implementation
-        return self._process_with_tools(state, model_with_tools, tools_by_name)
+        return self._process_with_tools(state, model_with_tools, tools_by_name, execution_mode)
 
     @abstractmethod
-    def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name) -> MessagesState:
+    def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name, execution_mode: str) -> MessagesState:
         """Agent-specific processing logic with tools"""
         pass
 

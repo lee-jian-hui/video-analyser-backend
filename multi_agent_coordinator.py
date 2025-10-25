@@ -23,8 +23,14 @@ class MultiAgentCoordinator:
                 return agent
         return None
 
-    def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a request from the frontend through appropriate agents"""
+    def process_request(self, request: Dict[str, Any], execution_mode: str = "single") -> Dict[str, Any]:
+        """
+        Process a request from the frontend through appropriate agents
+
+        Args:
+            request: The task request
+            execution_mode: "single" for one tool, "chain" for sequential tool execution
+        """
         # Create initial state
         state = MessagesState(
             messages=[HumanMessage(content=request.get("content", ""))],
@@ -40,14 +46,15 @@ class MultiAgentCoordinator:
                 "agent_used": None
             }
 
-        # Process with agent
+        # Process with agent using specified execution mode
         try:
-            result_state = agent.process(state)
+            result_state = agent.process(state, execution_mode=execution_mode)
             return {
                 "success": True,
                 "messages": [msg.content for msg in result_state["messages"]],
                 "agent_used": agent.name,
-                "llm_calls": result_state.get("llm_calls", 0)
+                "llm_calls": result_state.get("llm_calls", 0),
+                "execution_mode": execution_mode
             }
         except Exception as e:
             return {
