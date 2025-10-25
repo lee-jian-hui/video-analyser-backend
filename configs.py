@@ -55,6 +55,12 @@ class Config:
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER", "google_genai")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "gemini-2.0-flash-lite")
     MODEL_TEMPERATURE: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
+    
+    # Separate Function Calling and Chat Models
+    FUNCTION_CALLING_MODEL_TYPE: str = os.getenv("FUNCTION_CALLING_MODEL_TYPE", "gemini")
+    CHAT_MODEL_TYPE: str = os.getenv("CHAT_MODEL_TYPE", "phi3")
+    USE_LOCAL_FUNCTION_CALLING: bool = os.getenv("USE_LOCAL_FUNCTION_CALLING", "false").lower() == "true"
+    USE_LOCAL_CHAT: bool = os.getenv("USE_LOCAL_CHAT", "true").lower() == "true"
 
     # Local Model Hardware Configuration
     DEVICE_MAP: str = os.getenv("DEVICE_MAP", "cpu")  # "cpu", "auto", "cuda", etc.
@@ -83,7 +89,7 @@ class Config:
     @classmethod
     def validate(cls) -> bool:
         """Validate required configuration"""
-        required_fields = ["GEMINI_API_KEY"]
+        required_fields = []
 
         for field in required_fields:
             if not getattr(cls, field):

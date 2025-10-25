@@ -140,73 +140,59 @@ class AIModelManager:
             return False
 
     def _initialize_llama(self) -> bool:
-        """Initialize Llama model"""
+        """Initialize Llama model - cache it for later use"""
         try:
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-
-            model_config = self.model_configs[AIModelType.LLM]["llama"]
-            model_name = model_config["model_name"]
-            cache_dir = model_config["cache_dir"]
-
-            self.logger.info(f"Loading Llama model: {model_name}")
-
-            # Download/load tokenizer and model to cache directory
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
-                cache_dir=str(cache_dir),
-                local_files_only=False
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                cache_dir=str(cache_dir),
-                dtype=Config.TORCH_DTYPE,
-                device_map=Config.DEVICE_MAP,
-                local_files_only=False
-            )
-
-            self.logger.info(f"Llama model {model_name} loaded successfully")
-            return True
-
-        except ImportError:
-            self.logger.error("Transformers not installed. Run: pip install transformers torch")
-            return False
+            self.logger.info("Downloading Llama model to cache...")
+            result = self.get_llama_model()
+            if result:
+                self.logger.info("✅ Llama model cached successfully")
+                return True
+            else:
+                return False
         except Exception as e:
             self.logger.error(f"Failed to initialize Llama: {e}")
             return False
 
     def _initialize_codellama(self) -> bool:
-        """Initialize CodeLlama model"""
+        """Initialize CodeLlama model - cache it for later use"""
         try:
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-
-            model_config = self.model_configs[AIModelType.LLM]["codellama"]
-            model_name = model_config["model_name"]
-            cache_dir = model_config["cache_dir"]
-
-            self.logger.info(f"Loading CodeLlama model: {model_name}")
-
-            # Download/load tokenizer and model to cache directory
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
-                cache_dir=str(cache_dir),
-                local_files_only=False
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                cache_dir=str(cache_dir),
-                dtype=Config.TORCH_DTYPE,
-                device_map=Config.DEVICE_MAP,
-                local_files_only=False
-            )
-
-            self.logger.info(f"CodeLlama model {model_name} loaded successfully")
-            return True
-
-        except ImportError:
-            self.logger.error("Transformers not installed. Run: pip install transformers torch")
-            return False
+            self.logger.info("Downloading CodeLlama model to cache...")
+            result = self.get_codellama_model()
+            if result:
+                self.logger.info("✅ CodeLlama model cached successfully")
+                return True
+            else:
+                return False
         except Exception as e:
             self.logger.error(f"Failed to initialize CodeLlama: {e}")
+            return False
+
+    def _initialize_qwen(self) -> bool:
+        """Initialize Qwen model - cache it for later use"""
+        try:
+            self.logger.info("Downloading Qwen model to cache...")
+            result = self.get_qwen_1_5_b_model()
+            if result:
+                self.logger.info("✅ Qwen model cached successfully")
+                return True
+            else:
+                return False
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Qwen: {e}")
+            return False
+
+    def _initialize_phi3(self) -> bool:
+        """Initialize Phi-3 model - cache it for later use"""
+        try:
+            self.logger.info("Downloading Phi-3 model to cache...")
+            result = self.get_phi3_model()
+            if result:
+                self.logger.info("✅ Phi-3 model cached successfully")
+                return True
+            else:
+                return False
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Phi-3: {e}")
             return False
 
     def _initialize_local_llm(self) -> bool:
@@ -217,6 +203,10 @@ class AIModelManager:
             return self._initialize_codellama()
         elif local_model_type == "llama":
             return self._initialize_llama()
+        elif local_model_type == "qwen":
+            return self._initialize_qwen()
+        elif local_model_type == "phi3":
+            return self._initialize_phi3()
         else:
             self.logger.error(f"Unknown local model type: {local_model_type}")
             return False
@@ -312,7 +302,7 @@ class AIModelManager:
                 model_name,
                 cache_dir=str(cache_dir),
                 dtype="auto",
-                device_map="cpu"
+                device_map=Config.DEVICE_MAP
             )
 
             return {"model": model, "tokenizer": tokenizer}
@@ -339,13 +329,107 @@ class AIModelManager:
                 model_name,
                 cache_dir=str(cache_dir),
                 dtype="auto",
-                device_map="cpu"
+                device_map=Config.DEVICE_MAP
             )
 
             return {"model": model, "tokenizer": tokenizer}
 
         except Exception as e:
             self.logger.error(f"Failed to load CodeLlama model: {e}")
+            return None
+
+    def get_qwen_1_5_b_model(self):
+        """Get Qwen2.5-Coder model and tokenizer"""
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+            import torch
+
+            model_name = "unsloth/Qwen2.5-Coder-1.5B-bnb-4bit"
+            cache_dir = Path(Config.get_ml_model_cache_dir()) / "qwen-coder-1.5b"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # 4-bit quantization config (same as test.py)
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True
+            )
+            
+            # Set chat template (same as test.py)
+            if tokenizer.chat_template is None:
+                tokenizer.chat_template = (
+                    "{% for message in messages %}"
+                    "{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n'}}"
+                    "{% endfor %}"
+                    "{% if add_generation_prompt %}{{'<|im_start|>assistant\\n'}}{% endif %}"
+                )
+                tokenizer.save_pretrained(cache_dir)
+
+            # Load model with quantization
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                device_map=Config.DEVICE_MAP,
+                trust_remote_code=True,
+                quantization_config=bnb_config
+            )
+
+            return {"model": model, "tokenizer": tokenizer}
+
+        except Exception as e:
+            self.logger.error(f"Failed to load Qwen model: {e}")
+            return None
+
+    def get_phi3_model(self):
+        """Get Phi-3 Mini model and tokenizer"""
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+            import torch
+
+            model_name = "microsoft/Phi-3-mini-4k-instruct"
+            cache_dir = Path(Config.get_ml_model_cache_dir()) / "phi3-mini"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # 4-bit quantization config
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True,
+            )
+            
+            # Phi-3 has built-in chat template, but set if needed
+            if tokenizer.chat_template is None:
+                tokenizer.chat_template = "{% for message in messages %}{{'<|' + message['role'] + '|>\n' + message['content'] + '<|end|>\n'}}{% endfor %}{% if add_generation_prompt %}{{'<|assistant|>\n'}}{% endif %}"
+            
+            # Load model with quantization
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                device_map=Config.DEVICE_MAP,
+                trust_remote_code=True,
+                quantization_config=bnb_config
+            )
+
+            return {"model": model, "tokenizer": tokenizer}
+
+        except Exception as e:
+            self.logger.error(f"Failed to load Phi-3 model: {e}")
             return None
 
     def get_model_status(self) -> Dict[str, Dict[str, Any]]:
