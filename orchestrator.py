@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Literal, Union
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command
 from graph import MessagesState
 from llm import get_function_calling_llm, get_chat_llm
 from multi_agent_coordinator import MultiAgentCoordinator
@@ -80,39 +81,24 @@ class MultiStageOrchestrator:
             self.logger.error(f"Failed to register default VisionAgent: {e}")
 
     def _build_workflow(self) -> StateGraph:
-        """Build workflow with separate function calling and chat steps"""
+        """Build workflow using idiomatic Command pattern"""
         workflow = StateGraph(OrchestratorState)
 
-        # FUNCTION CALLING STEPS (use function_calling_model)
+        # Add all nodes - routing handled by Command pattern
         workflow.add_node("agent_selector", self._agent_selector_node)      # Structured decision
         workflow.add_node("tool_planner", self._tool_planner_node)          # Structured planning
         workflow.add_node("execute_agent", self._execute_agent_node)        # Tool execution
-        
-        # CHAT STEPS (use chat_model) 
         workflow.add_node("response_generator", self._response_generator_node)  # Natural language
         workflow.add_node("final_formatter", self._final_formatter_node)        # User-friendly output
 
-        # EDGES
+        # Only need start edge - Command pattern handles all routing
         workflow.add_edge(START, "agent_selector")
-        workflow.add_edge("agent_selector", "tool_planner") 
-        workflow.add_edge("tool_planner", "execute_agent")
-        
-        # Conditional edge: continue execution or go to chat
-        workflow.add_conditional_edges(
-            "execute_agent",
-            self._execution_router,
-            {
-                "continue_execution": "execute_agent",
-                "generate_response": "response_generator"  # NEW: Go to chat step
-            }
-        )
-        workflow.add_edge("response_generator", "final_formatter")
         workflow.add_edge("final_formatter", END)
 
         return workflow.compile()
 
-    def _agent_selector_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        """Stage 1: LLM selects which agents to use"""
+    def _agent_selector_node(self, state: OrchestratorState) -> Command[Literal["tool_planner"]]:
+        """FUNCTION CALLING: Select which agents to use"""
         available_agents_dict = self.coordinator.get_available_agents()
 
         # Format available agents for template
@@ -143,15 +129,19 @@ class MultiStageOrchestrator:
             # Fallback: default to vision agent
             selected_agents = ["vision_agent"]
 
-        return {
-            "selected_agents": selected_agents,
-            "messages": state["messages"] + [
-                AIMessage(content=f"Selected agents: {selected_agents}")
-            ]
-        }
+        return Command(
+            update={
+                "selected_agents": selected_agents,
+                "function_calling_steps": state.get('function_calling_steps', 0) + 1,
+                "messages": state["messages"] + [
+                    AIMessage(content=f"Selected agents: {selected_agents}")
+                ]
+            },
+            goto="tool_planner"
+        )
 
-    def _tool_planner_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        """Stage 2: LLM plans tools for each selected agent"""
+    def _tool_planner_node(self, state: OrchestratorState) -> Command[Literal["execute_agent"]]:
+        """FUNCTION CALLING: Plan tools for each selected agent"""
         execution_plans = {}
 
         for agent_name in state["selected_agents"]:
@@ -200,22 +190,29 @@ class MultiStageOrchestrator:
 
             execution_plans[agent_name] = tools
 
-        return {
-            "execution_plans": execution_plans,
-            "messages": state["messages"] + [
-                AIMessage(content=f"Execution plans: {execution_plans}")
-            ]
-        }
+        return Command(
+            update={
+                "execution_plans": execution_plans,
+                "function_calling_steps": state.get('function_calling_steps', 0) + 1,
+                "messages": state["messages"] + [
+                    AIMessage(content=f"Execution plans: {execution_plans}")
+                ]
+            },
+            goto="execute_agent"
+        )
 
-    def _execute_agent_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        """Stage 3: Execute current agent with planned tools"""
+    def _execute_agent_node(self, state: OrchestratorState) -> Command[Literal["execute_agent", "response_generator"]]:
+        """FUNCTION CALLING: Execute current agent with planned tools"""
         self.logger.debug(f"Executing agent node, current_agent_index: {state['current_agent_index']}")
         agent_names = list(state["execution_plans"].keys())
         self.logger.debug(f"Agent names: {agent_names}")
 
         if state["current_agent_index"] >= len(agent_names):
-            self.logger.debug("No more agents to execute")
-            return state  # No more agents to execute
+            self.logger.debug("All agents executed, moving to response generation")
+            return Command(
+                update={},
+                goto="response_generator"
+            )
 
         current_agent_name = agent_names[state["current_agent_index"]]
         planned_tools = state["execution_plans"][current_agent_name]
@@ -232,43 +229,28 @@ class MultiStageOrchestrator:
         # Store result
         agent_results = state["agent_results"].copy()
         agent_results[current_agent_name] = result
+        
+        new_agent_index = state["current_agent_index"] + 1
+        
+        # Determine next step: continue with more agents or go to response generation
+        if new_agent_index < len(agent_names):
+            next_step = "execute_agent"
+        else:
+            next_step = "response_generator"
 
-        return {
-            "agent_results": agent_results,
-            "current_agent_index": state["current_agent_index"] + 1,
-            "messages": state["messages"] + [
-                AIMessage(content=f"Executed {current_agent_name}: {result.get('messages', [])}")
-            ]
-        }
-
-    def _execution_router(self, state: OrchestratorState) -> Literal["continue_execution", "generate_response"]:
-        """Route between continuing execution or aggregating results"""
-        self.logger.debug(f"Execution router - current_agent_index: {state['current_agent_index']}, execution_plans length: {len(state['execution_plans'])}")
-        if state["current_agent_index"] < len(state["execution_plans"]):
-            self.logger.debug("Routing to: continue_execution")
-            return "continue_execution"
-        self.logger.debug("Routing to: generate_response")
-        return "generate_response"
-
-    def _aggregate_results_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        """Final stage: Aggregate all agent results"""
-        # Use template
-        prompt_template = OrchestratorPrompts.RESULT_AGGREGATOR
-        formatted_prompt = prompt_template.format(
-            original_task=state['task_request'].task.get_task_description(),
-            agent_results=json.dumps(state['agent_results'], indent=2)
+        return Command(
+            update={
+                "agent_results": agent_results,
+                "current_agent_index": new_agent_index,
+                "messages": state["messages"] + [
+                    AIMessage(content=f"Executed {current_agent_name}: {result.get('messages', [])}")
+                ]
+            },
+            goto=next_step
         )
 
-        response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
 
-        return {
-            "final_result": response.content,
-            "messages": state["messages"] + [
-                AIMessage(content=f"Final Result: {response.content}")
-            ]
-        }
-
-    def _response_generator_node(self, state: OrchestratorState) -> Dict[str, Any]:
+    def _response_generator_node(self, state: OrchestratorState) -> Command[Literal["final_formatter"]]:
         """CHAT: Generate natural language response from agent results"""
         agent_results = state.get('agent_results', {})
         user_request = state['task_request'].task.get_task_description()
@@ -292,16 +274,19 @@ class MultiStageOrchestrator:
         # Use chat LLM for natural conversation
         response = self.chat_model.invoke([HumanMessage(content=prompt)])
         
-        return {
-            "chat_response": response.content,
-            "chat_steps": state.get('chat_steps', 0) + 1,
-            "messages": state["messages"] + [
-                AIMessage(content=f"Generated response: {response.content}")
-            ]
-        }
+        return Command(
+            update={
+                "chat_response": response.content,
+                "chat_steps": state.get('chat_steps', 0) + 1,
+                "messages": state["messages"] + [
+                    AIMessage(content=f"Generated response: {response.content}")
+                ]
+            },
+            goto="final_formatter"
+        )
 
     def _final_formatter_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        """CHAT: Final formatting and polish of the response"""
+        """CHAT: Final formatting and polish of the response - END node"""
         chat_response = state.get('chat_response', '')
         user_request = state['task_request'].task.get_task_description()
         
