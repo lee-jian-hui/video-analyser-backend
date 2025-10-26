@@ -1,167 +1,275 @@
+"""
+gRPC Server for Video Analyzer
+
+Updated to support:
+- Streaming file upload
+- Chat interface with natural language
+- Integration with multi-agent orchestrator
+- OS-appropriate file storage
+"""
+
 import grpc
 from concurrent import futures
-import api_pb2
-import api_pb2_grpc
+from protos import video_analyzer_pb2
+from protos import video_analyzer_pb2_grpc
 import logging
-import uuid
-import os
 import json
-import datetime
 
-class VideoProcessorService(api_pb2_grpc.VideoProcessorServiceServicer):
+# Import services
+from services.file_storage import FileStorage
+from context.video_context import get_video_context
+
+# Import orchestrator
+from orchestrator import MultiStageOrchestrator
+from models.task_models import TaskRequest, VideoTask
+from services.video_registrar import VideoRegistrar
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer):
+    """gRPC service for video analysis with multi-agent orchestration"""
+
     def __init__(self):
-        self.videos = {}  # Store video metadata
-        self.upload_dir = "uploads"
-        os.makedirs(self.upload_dir, exist_ok=True)
+        logger.info("Initializing VideoAnalyzerService...")
 
-    def UploadVideo(self, request, context):
+        # Initialize file storage (OS-appropriate directories)
+        self.file_storage = FileStorage()
+
+        # Initialize video context (singleton)
+        self.video_context = get_video_context()
+
+        # Initialize multi-agent orchestrator
+        self.orchestrator = MultiStageOrchestrator()
+        self.video_registrar = VideoRegistrar(file_storage=self.file_storage)
+
+        logger.info("✅ VideoAnalyzerService initialized successfully")
+        logger.info(f"   File storage: {self.file_storage.base_dir}")
+
+    def UploadVideo(self, request_iterator, context):
+        """
+        Handle streaming video upload (Phase 1).
+
+        Receives video file in chunks and saves to OS-appropriate directory.
+        Returns file_id for future reference.
+        """
         try:
-            video_id = str(uuid.uuid4())
-            filename = request.filename
-            video_data = request.video_data
+            chunks = []
+            filename = None
+            chunk_count = 0
 
-            # Save video file
-            file_path = os.path.join(self.upload_dir, f"{video_id}_{filename}")
-            with open(file_path, 'wb') as f:
-                f.write(video_data)
+            logger.info("📥 Receiving video upload...")
 
-            # Store metadata
-            self.videos[video_id] = {
-                'filename': filename,
-                'file_path': file_path,
-                'status': 'uploaded',
-                'upload_time': str(datetime.datetime.now())
-            }
+            # Collect all chunks
+            for chunk in request_iterator:
+                chunks.append(chunk.data)
+                chunk_count += 1
 
-            return api_pb2.VideoUploadResponse(
-                video_id=video_id,
-                success=True,
-                message=f"Video {filename} uploaded successfully"
+                if not filename:
+                    filename = chunk.filename
+                    logger.info(f"   Filename: {filename}")
+
+            # Combine chunks
+            file_data = b''.join(chunks)
+            total_size_mb = len(file_data) / (1024 * 1024)
+
+            logger.info(f"   Received {chunk_count} chunks, {total_size_mb:.2f} MB total")
+
+            # Save file using FileStorage
+            file_id, file_path = self.file_storage.save_uploaded_file(
+                file_data, filename
             )
+
+            # Update video context
+            self.video_context.set_current_video(file_path)
+
+            logger.info(f"✅ Upload successful: {filename} → {file_id}")
+            logger.info(f"   Saved to: {file_path}")
+
+            return video_analyzer_pb2.UploadResponse(
+                file_id=file_id,
+                success=True,
+                message=f"Video '{filename}' uploaded successfully ({total_size_mb:.2f} MB)"
+            )
+
         except Exception as e:
-            return api_pb2.VideoUploadResponse(
-                video_id="",
+            logger.error(f"❌ Upload failed: {e}", exc_info=True)
+            return video_analyzer_pb2.UploadResponse(
+                file_id="",
                 success=False,
                 message=f"Upload failed: {str(e)}"
             )
 
-    def ProcessQuery(self, request, context):
-        video_id = request.video_id
-        query = request.query
-        query_type = request.query_type
-
-        if video_id not in self.videos:
-            return api_pb2.QueryResponse(
-                result="",
-                success=False,
-                error_message="Video not found"
+    def RegisterLocalVideo(self, request, context):
+        """
+        Register a local file selected on the frontend without streaming bytes.
+        """
+        try:
+            metadata = self.video_registrar.register_local_file(
+                source_path=request.file_path,
+                display_name=request.display_name or None,
+                copy_file=not request.reference_only,
             )
 
-        try:
-            # Mock processing based on query type
-            if query_type == "transcribe":
-                result = self._mock_transcription(query)
-            elif query_type == "summarize":
-                result = self._mock_summary(query)
-            elif query_type == "analyze":
-                result = self._mock_analysis(query)
-            elif query_type == "extract":
-                result = self._mock_extraction(query)
-            else:
-                result = f"Processing query: '{query}' for video {video_id}\n\nThis is a mock response. In a real implementation, this would:\n- Process the video file\n- Use AI/ML models for analysis\n- Return actual results"
+            return video_analyzer_pb2.RegisterVideoResponse(
+                file_id=metadata["file_id"],
+                stored_path=metadata["stored_path"],
+                display_name=metadata["display_name"],
+                copied=metadata["copied"],
+                size_bytes=int(metadata["size_bytes"]),
+                registered_at=float(metadata["registered_at"]),
+                message="Video registered successfully",
+            )
 
-            return api_pb2.QueryResponse(
-                result=result,
-                success=True,
-                error_message=""
+        except FileNotFoundError as e:
+            logger.error(f"❌ RegisterLocalVideo failed: {e}")
+            context.set_details(str(e))
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            return video_analyzer_pb2.RegisterVideoResponse(
+                file_id="",
+                message=str(e),
             )
         except Exception as e:
-            return api_pb2.QueryResponse(
-                result="",
-                success=False,
-                error_message=str(e)
+            logger.error(f"❌ RegisterLocalVideo error: {e}", exc_info=True)
+            context.set_details(str(e))
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return video_analyzer_pb2.RegisterVideoResponse(
+                file_id="",
+                message=str(e),
             )
 
-    def GetProcessingStatus(self, request, context):
-        video_id = request.video_id
+    def SendChatMessage(self, request, context):
+        """
+        Handle chat messages with streaming responses (Phase 3).
 
-        if video_id not in self.videos:
-            return api_pb2.StatusResponse(
-                status="error",
-                progress_percentage=0,
-                message="Video not found"
+        Processes natural language queries using multi-agent orchestrator.
+        Streams progress updates and final results.
+        """
+        message = request.message
+        file_id = request.file_id or None
+
+        logger.info(f"💬 Chat message: '{message}'")
+
+        if file_id:
+            logger.info(f"   For video: {file_id}")
+
+        try:
+            # If file_id specified, set as current video
+            if file_id:
+                file_path = self.file_storage.get_file_path(file_id)
+                self.video_context.set_current_video(file_path)
+                logger.info(f"   Loaded video: {file_path}")
+
+            # Yield initial progress update
+            yield video_analyzer_pb2.ChatResponse(
+                type=video_analyzer_pb2.ChatResponse.PROGRESS,
+                content="Processing your request...",
+                agent_name="orchestrator"
             )
 
-        return api_pb2.StatusResponse(
-            status="completed",
-            progress_percentage=100,
-            message="Video processing completed"
-        )
+            # Process with multi-agent orchestrator
+            # Create TaskRequest for the orchestrator
+            task_request = TaskRequest(
+                task=VideoTask(
+                    description=message,
+                    file_path=self.video_context.get_current_video_path() or "",
+                    task_type=None
+                )
+            )
 
-    def _mock_transcription(self, query):
-        return """[Mock Transcription]
-Speaker 1: Welcome to today's presentation on quarterly results.
-Speaker 2: Thank you. Let's start with the key metrics...
-Speaker 1: Our revenue increased by 15% this quarter.
-Speaker 2: The main growth drivers were product sales and services.
+            logger.info("🤖 Processing with multi-agent orchestrator...")
+            result = self.orchestrator.process_task(task_request)
 
-Note: This is a simulated transcription. Real implementation would use speech-to-text AI."""
+            logger.info(f"✅ Processing complete")
+            logger.info(f"   Agents used: {result.get('selected_agents', [])}")
+            logger.info(f"   LLM calls: {result.get('total_llm_calls', 0)}")
 
-    def _mock_summary(self, query):
-        return """[Mock Summary]
-Key Points from Video:
-• Quarterly revenue increased by 15%
-• Main growth drivers: product sales and services
-• Positive outlook for next quarter
-• Team collaboration was highlighted as a success factor
+            # Yield final result
+            yield video_analyzer_pb2.ChatResponse(
+                type=video_analyzer_pb2.ChatResponse.RESULT,
+                content=result.get("final_result", "No response generated"),
+                agent_name=", ".join(result.get("selected_agents", [])),
+                result_json=json.dumps({
+                    "selected_agents": result.get("selected_agents", []),
+                    "execution_plans": result.get("execution_plans", {}),
+                    "agent_results": result.get("agent_results", {}),
+                    "llm_calls": result.get("total_llm_calls", 0)
+                })
+            )
 
-Note: This is a simulated summary. Real implementation would use AI summarization."""
+        except FileNotFoundError as e:
+            logger.error(f"❌ File not found: {e}")
+            yield video_analyzer_pb2.ChatResponse(
+                type=video_analyzer_pb2.ChatResponse.ERROR,
+                content=f"Video file not found. Please upload a video first."
+            )
+        except Exception as e:
+            logger.error(f"❌ Error processing message: {e}", exc_info=True)
+            yield video_analyzer_pb2.ChatResponse(
+                type=video_analyzer_pb2.ChatResponse.ERROR,
+                content=f"Error: {str(e)}"
+            )
 
-    def _mock_analysis(self, query):
-        return """[Mock Analysis]
-Objects detected in video:
-• People: 2 speakers
-• Presentation screen/display
-• Conference table
-• Documents/papers
-• Laptop/computer
+    def GetChatHistory(self, request, context):
+        """
+        Retrieve chat history (Phase 4 - TODO).
 
-Visual elements:
-• Charts and graphs showing upward trends
-• Company logo visible
-• Professional meeting room setting
+        Currently returns empty history. Will be implemented
+        with ChatHistoryStore in Phase 4.
+        """
+        logger.info("📜 GetChatHistory called (not yet implemented)")
 
-Note: This is simulated analysis. Real implementation would use computer vision AI."""
+        # TODO: Implement ChatHistoryStore in Phase 4
+        return video_analyzer_pb2.ChatHistoryResponse(messages=[])
 
-    def _mock_extraction(self, query):
-        return """[Mock Data Extraction]
-Graphs and Charts found:
-1. Revenue Growth Chart (Bar chart)
-   - Q1: $2.1M
-   - Q2: $2.4M
-   - Q3: $2.8M
-   - Q4: $3.2M
 
-2. Market Share Pie Chart
-   - Product A: 35%
-   - Product B: 28%
-   - Product C: 22%
-   - Others: 15%
+def serve(port: int = 50051):
+    """Start gRPC server"""
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=4),
+        options=[
+            # Support large video files (100MB max)
+            ('grpc.max_send_message_length', 100 * 1024 * 1024),
+            ('grpc.max_receive_message_length', 100 * 1024 * 1024),
+        ]
+    )
 
-Note: This is simulated extraction. Real implementation would use OCR and data extraction AI."""
+    # Register service
+    video_analyzer_pb2_grpc.add_VideoAnalyzerServiceServicer_to_server(
+        VideoAnalyzerService(), server
+    )
 
-def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    api_pb2_grpc.add_VideoProcessorServiceServicer_to_server(VideoProcessorService(), server)
-
-    listen_addr = '[::]:50051'
+    listen_addr = f'[::]:{port}'
     server.add_insecure_port(listen_addr)
 
-    logging.basicConfig(level=logging.INFO)
-    logging.info(f"Starting Video Processor gRPC server on {listen_addr}")
+    logger.info("=" * 60)
+    logger.info("🚀 Video Analyzer gRPC Server")
+    logger.info("=" * 60)
+    logger.info(f"✅ Server started on {listen_addr}")
+    logger.info(f"   Tauri frontend can connect to: localhost:{port}")
+    logger.info(f"   Protocol: video_analyzer.VideoAnalyzerService")
+    logger.info("=" * 60)
+    logger.info("Available RPCs:")
+    logger.info("  - UploadVideo (streaming)")
+    logger.info("  - SendChatMessage (streaming)")
+    logger.info("  - GetChatHistory")
+    logger.info("=" * 60)
 
     server.start()
-    server.wait_for_termination()
+
+    try:
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Shutting down gRPC server...")
+        server.stop(grace=5)
+        logger.info("✅ Server stopped")
+
 
 if __name__ == '__main__':
     serve()

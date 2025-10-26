@@ -155,6 +155,11 @@ These are the MINIMUM requirements to get Tauri frontend talking to Python backe
   - [ ] Return file_id to frontend
 - [ ] Update `VideoContext` to track multiple files by file_id
 - [ ] Test file upload with large video files (>100MB)
+- [x] Add CLI helper (`scripts/upload_video.py`) to perform streaming uploads during manual testing
+- [x] Implement `VideoRegistrar` service to register local files + metadata without streaming uploads
+- [x] Allow swapping registry persistence backends (JSON today, DB later) via `VideoRegistryStore`
+- [x] Add `storage_paths.py` helper to centralize storage root/videos/outputs paths
+- [x] Expose `RegisterLocalVideo` gRPC RPC to call the registrar from Tauri
 - [ ] **Deliverable:** Frontend can upload videos, backend saves them
 
 #### ✅ **Phase 2: Agent Response Format (1-2 days)**

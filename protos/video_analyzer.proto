@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package video_analyzer;
+
+service VideoAnalyzerService {
+  // Phase 1: Streaming file upload (supports large video files)
+  rpc UploadVideo(stream VideoChunk) returns (UploadResponse);
+
+  // Desktop shortcut: register local files without streaming upload
+  rpc RegisterLocalVideo(RegisterVideoRequest) returns (RegisterVideoResponse);
+
+  // Phase 3: Chat interface with streaming responses
+  rpc SendChatMessage(ChatRequest) returns (stream ChatResponse);
+
+  // Phase 4: Chat history (lower priority)
+  rpc GetChatHistory(HistoryRequest) returns (ChatHistoryResponse);
+}
+
+// File upload messages
+message VideoChunk {
+  bytes data = 1;
+  string filename = 2;
+  int32 chunk_index = 3;
+}
+
+message UploadResponse {
+  string file_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message RegisterVideoRequest {
+  string file_path = 1;
+  string display_name = 2;
+  bool reference_only = 3;  // true = keep original path, false = copy into storage
+}
+
+message RegisterVideoResponse {
+  string file_id = 1;
+  string stored_path = 2;
+  string display_name = 3;
+  bool copied = 4;
+  int64 size_bytes = 5;
+  double registered_at = 6;
+  string message = 7;
+}
+
+// Chat messages
+message ChatRequest {
+  string message = 1;
+  string file_id = 2;  // Optional: which video to analyze
+}
+
+message ChatResponse {
+  enum ResponseType {
+    MESSAGE = 0;
+    PROGRESS = 1;
+    RESULT = 2;
+    ERROR = 3;
+  }
+
+  ResponseType type = 1;
+  string content = 2;
+  string agent_name = 3;
+  string result_json = 4;  // Structured data (transcripts, detections)
+}
+
+// History messages (Phase 4)
+message HistoryRequest {
+  int32 limit = 1;
+}
+
+message ChatHistoryResponse {
+  repeated ChatMessage messages = 1;
+}
+
+message ChatMessage {
+  string role = 1;
+  string content = 2;
+  int64 timestamp = 3;
+}

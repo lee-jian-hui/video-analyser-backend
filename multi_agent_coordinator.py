@@ -89,8 +89,8 @@ class MultiAgentCoordinator:
     def get_available_agents(self) -> Dict[str, List[str]]:
         """Get list of available agents and their capabilities"""
         return self.agent_capabilities
-
     def process_task_request(self, task_request: TaskRequest, agent_name: str = None, planned_tools: List[str] = None) -> Dict[str, Any]:
+
         """
         Process a TaskRequest through the appropriate agent
 

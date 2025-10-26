@@ -332,18 +332,18 @@ class MultiStageOrchestrator:
             ]
         }
 
-    def process_task(self, task_request: Union[TaskRequest, str], file_path: str = None) -> Dict[str, Any]:
+    def process_task(self, task_request: TaskRequest, file_path: str = None) -> Dict[str, Any]:
         """Main entry point for processing a task"""
         # Handle backward compatibility - convert string to TaskRequest
-        if isinstance(task_request, str):
-            from models.task_models import VideoTask
-            task_request = TaskRequest(
-                task=VideoTask(
-                    description=task_request,
-                    file_path=file_path or "./sample.mp4",
-                    task_type="object_detection"
-                )
-            )
+        # if isinstance(task_request, str):
+        #     from models.task_models import VideoTask
+        #     task_request = TaskRequest(
+        #         task=VideoTask(
+        #             description=task_request,
+        #             file_path=file_path or "./sample.mp4",
+        #             task_type="object_detection"
+        #         )
+        #     )
 
         # Load video into context if it's a video task
         if hasattr(task_request.task, 'file_path'):
