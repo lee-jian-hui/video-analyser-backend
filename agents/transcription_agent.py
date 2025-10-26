@@ -1,3 +1,9 @@
+"""
+Transcription Agent
+
+Handles speech-to-text transcription tasks using Whisper.
+"""
+
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from langchain.messages import AIMessage, HumanMessage, ToolMessage
@@ -6,20 +12,71 @@ from configs import Config
 from langchain.tools import tool
 
 from graph import MessagesState
-from templates.vision_agent_prompts import VisionAgentPrompts  # Reuse for now
+from templates.transcription_agent_prompts import TranscriptAgentPrompt
 from utils.logger import get_logger
+from models.agent_capabilities import AgentCapability, CapabilityCategory
 
 import whisper
 import moviepy.editor as mp
 import tempfile
 import os
 
+from context.video_context import get_video_context
+
+
+# ============================================================================
+# AGENT CAPABILITIES DEFINITION
+# ============================================================================
+TRANSCRIPTION_AGENT_CAPABILITIES = AgentCapability(
+    capabilities=[
+        "Audio transcription from video",
+        "Speech-to-text conversion",
+        "Subtitle generation",
+        "Spoken word extraction",
+        "Video audio analysis",
+    ],
+    intent_keywords=[
+        # Primary keywords
+        "transcribe", "transcript", "transcription",
+        "speech", "spoken", "audio",
+        "subtitle", "subtitles", "captions",
+        # Action phrases
+        "what said", "what was said", "what they said",
+        "convert to text", "extract audio",
+        "get transcript", "generate transcript",
+        # Related terms
+        "voice", "talk", "speaking", "words",
+        "dialogue", "conversation",
+    ],
+    categories=[
+        CapabilityCategory.AUDIO,
+        CapabilityCategory.TEXT,
+    ],
+    example_tasks=[
+        "Transcribe the video",
+        "Generate a transcript for this video",
+        "What was said in the video?",
+        "Extract all spoken words from the video",
+        "Convert the audio to text",
+        "Create subtitles for the video",
+    ],
+    routing_priority=8,  # High priority for clear audio/transcription requests
+)
+
 
 @tool
-def video_to_transcript(video_path: str, language: str = "en") -> str:
-    """Extract audio from video and transcribe to text using Whisper"""
-    try:
+def video_to_transcript() -> str:
+    """Extract audio from video and transcribe to text using Whisper.
 
+    Uses the current video from VideoContext.
+    """
+    language: str = "en"
+    try:
+        video_context = get_video_context()
+        video_path = video_context.get_current_video_path()
+
+        if not video_path:
+            return "Error: No video loaded in context. Please load a video first."
 
         # Check if video file exists
         if not os.path.exists(video_path):
@@ -58,9 +115,31 @@ def video_to_transcript(video_path: str, language: str = "en") -> str:
                         end_time = f"{int(segment['end']//60):02d}:{int(segment['end']%60):02d}"
                         formatted_transcript.append(f"[{start_time}-{end_time}] {segment['text'].strip()}")
 
-                    return f"Transcription complete. Full text: {transcript_text}\n\nTimestamped transcript:\n" + "\n".join(formatted_transcript)
+                    # Full transcript for file
+                    full_transcript = f"Transcription complete. Full text: {transcript_text}\n\nTimestamped transcript:\n" + "\n".join(formatted_transcript)
+
+                    # Summary for LLM (first 5 and last 5 segments)
+                    total_segments = len(formatted_transcript)
+                    if total_segments > 10:
+                        preview_segments = formatted_transcript[:5] + [f"\n... ({total_segments - 10} more segments) ...\n"] + formatted_transcript[-5:]
+                    else:
+                        preview_segments = formatted_transcript
+
+                    llm_output = f"Transcription complete. Total segments: {total_segments}\n\nPreview:\n" + "\n".join(preview_segments)
                 else:
-                    return f"Transcription complete: {transcript_text}"
+                    full_transcript = f"Transcription complete: {transcript_text}"
+                    llm_output = full_transcript
+
+                # Save FULL transcript to file
+                transcript_filename = os.path.splitext(os.path.basename(video_path))[0] + "_transcript.txt"
+                transcript_path = os.path.join(os.path.dirname(video_path), transcript_filename)
+
+                try:
+                    with open(transcript_path, 'w', encoding='utf-8') as f:
+                        f.write(full_transcript)
+                    return f"{llm_output}\n\n✅ Full transcript saved to: {transcript_path}"
+                except Exception as save_error:
+                    return f"{llm_output}\n\n⚠️ Warning: Could not save transcript file: {str(save_error)}"
 
             finally:
                 # Clean up temporary file
@@ -68,13 +147,8 @@ def video_to_transcript(video_path: str, language: str = "en") -> str:
                     os.unlink(temp_audio.name)
 
     except ImportError as e:
-        missing_deps = []
-        if "whisper" in str(e):
-            missing_deps.append("openai-whisper")
-        if "moviepy" in str(e):
-            missing_deps.append("moviepy")
 
-        return f"Missing dependencies. Please install: pip install {' '.join(missing_deps)}"
+        return f"{str(e)}"
     except Exception as e:
         return f"Error during transcription: {str(e)}"
 
@@ -83,11 +157,14 @@ class TranscriptionAgent(BaseAgent):
     """Agent for speech-to-text transcription tasks"""
 
     def __init__(self):
+        # Use capabilities from the module-level definition
         super().__init__(
             name="transcription_agent",
-            capabilities=["speech_to_text", "audio_processing", "transcription"]
+            capabilities=TRANSCRIPTION_AGENT_CAPABILITIES.capabilities
         )
+        self.capability_definition = TRANSCRIPTION_AGENT_CAPABILITIES
         self.model = get_llm_model()
+
         # Define tools directly for this agent
         self.tools = [video_to_transcript]
 
@@ -96,10 +173,23 @@ class TranscriptionAgent(BaseAgent):
             from utils.tool_discovery import ToolDiscovery
             self.tools = ToolDiscovery.discover_tools_in_class(self)
 
+        # Register capabilities with the registry
+        from models.agent_capabilities import AgentCapabilityRegistry
+        AgentCapabilityRegistry.register(self.name, self.capability_definition)
+
     def can_handle(self, task: Dict[str, Any]) -> bool:
-        """Check if this agent can handle the task"""
+        """Check if this agent can handle the task (legacy support)"""
+        # Legacy: Check old-style task_type
         task_type = task.get("task_type", "").lower()
-        return task_type in ["transcription", "speech_to_text", "audio"]
+        if task_type in ["transcription", "speech_to_text", "audio"]:
+            return True
+
+        # New: Check description-based intent matching
+        description = task.get("description", "")
+        if description:
+            return self.capability_definition.matches_description(description)
+
+        return False
 
     def get_model(self):
         """Get the model instance for this agent"""
@@ -155,7 +245,7 @@ class TranscriptionAgent(BaseAgent):
         file_path_context = f"File to process: {task.file_path}" if hasattr(task, 'file_path') else ""
 
         # Use template prompt
-        prompt = VisionAgentPrompts.format_tool_execution_prompt(
+        prompt = TranscriptAgentPrompt.format_tool_execution_prompt(
             tool_descriptions=formatted_tools,
             task_content=task_description,
             file_path_context=file_path_context
@@ -208,7 +298,7 @@ class TranscriptionAgent(BaseAgent):
 
                             except Exception as tool_error:
                                 logger.error(f"Tool execution error: {tool_error}")
-                                error_content = VisionAgentPrompts.format_error_response(
+                                error_content = TranscriptAgentPrompt.format_error_response(
                                     error_message=f"Error executing {tool_name}: {str(tool_error)}"
                                 )
                                 error_message = ToolMessage(
@@ -240,7 +330,7 @@ class TranscriptionAgent(BaseAgent):
 
         except Exception as e:
             logger.error(f"Transcription agent processing error: {e}")
-            error_content = VisionAgentPrompts.format_error_response(
+            error_content = TranscriptAgentPrompt.format_error_response(
                 error_message=f"Transcription agent processing error: {str(e)}"
             )
             error_message = AIMessage(content=error_content)

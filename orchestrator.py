@@ -100,34 +100,50 @@ class MultiStageOrchestrator:
     def _agent_selector_node(self, state: OrchestratorState) -> Command[Literal["tool_planner"]]:
         """FUNCTION CALLING: Select which agents to use"""
         available_agents_dict = self.coordinator.get_available_agents()
+        task_description = state['task_request'].task.get_task_description()
 
-        # Format available agents for template
-        available_agents = "\n".join([
-            f"- {name}: {', '.join(capabilities)}"
-            for name, capabilities in available_agents_dict.items()
-        ])
+        # NEW: Try intent-based routing first
+        from routing.intent_classifier import get_intent_classifier
+        classifier = get_intent_classifier()
+        intent_matches = classifier.classify(task_description)
 
-        # Use template
-        prompt_template = OrchestratorPrompts.AGENT_SELECTOR
-        formatted_prompt = prompt_template.format(
-            available_agents=list(available_agents_dict.keys()),
-            agent_capabilities=available_agents,
-            user_request=state['task_request'].task.get_task_description()
-        )
+        if intent_matches:
+            selected_agents = [agent_name for agent_name, score in intent_matches[:2]]  # Top 2 agents
+            self.logger.info(f"🎯 Intent-based agent selection: '{task_description}'")
+            self.logger.info(f"   → Selected agents: {selected_agents} (scores: {[f'{s:.2f}' for _, s in intent_matches[:2]]})")
+        else:
+            # Fallback to LLM-based selection
+            self.logger.info(f"⚠️  No intent match, using LLM-based selection for: '{task_description}'")
 
-        response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
+            # Format available agents for template
+            available_agents = "\n".join([
+                f"- {name}: {', '.join(capabilities)}"
+                for name, capabilities in available_agents_dict.items()
+            ])
 
-        try:
-            # Extract JSON from response
-            json_match = re.search(r'\[.*?\]', response.content)
-            if json_match:
-                selected_agents = json.loads(json_match.group())
-            else:
-                # Fallback: try to parse the entire response
-                selected_agents = json.loads(response.content)
-        except:
-            # Fallback: default to vision agent
-            selected_agents = ["vision_agent"]
+            # Use template
+            prompt_template = OrchestratorPrompts.AGENT_SELECTOR
+            formatted_prompt = prompt_template.format(
+                available_agents=list(available_agents_dict.keys()),
+                agent_capabilities=available_agents,
+                user_request=task_description
+            )
+
+            response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
+
+            try:
+                # Extract JSON from response
+                json_match = re.search(r'\[.*?\]', response.content)
+                if json_match:
+                    selected_agents = json.loads(json_match.group())
+                else:
+                    # Fallback: try to parse the entire response
+                    selected_agents = json.loads(response.content)
+            except:
+                # Fallback: default to vision agent
+                selected_agents = ["vision_agent"]
+
+            self.logger.info(f"   → LLM selected agents: {selected_agents}")
 
         return Command(
             update={
@@ -329,22 +345,29 @@ class MultiStageOrchestrator:
                 )
             )
 
+        # Load video into context if it's a video task
+        if hasattr(task_request.task, 'file_path'):
+            from context.video_context import get_video_context
+            video_context = get_video_context()
+            video_context.set_current_video(task_request.task.file_path)
+            self.logger.info(f"📹 Loaded video into context: {task_request.task.file_path}")
+
         initial_state = {
             "messages": [HumanMessage(content=task_request.task.description)],
             "llm_calls": 0,
             "task_request": task_request,
-            
+
             # FUNCTION CALLING RESULTS
             "selected_agents": [],
             "execution_plans": {},
             "agent_results": {},
             "current_agent_index": 0,
-            
+
             # CHAT RESULTS
             "chat_response": "",
             "final_result": "",
-            
-            # METADATA  
+
+            # METADATA
             "function_calling_steps": 0,
             "chat_steps": 0
         }

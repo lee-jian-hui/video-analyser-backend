@@ -1,3 +1,9 @@
+"""
+Vision Agent
+
+Handles computer vision tasks including object detection, tracking, and visual analysis.
+"""
+
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from graph import MessagesState
@@ -9,9 +15,52 @@ from configs import Config
 from templates.vision_agent_prompts import VisionAgentPrompts
 from langchain.messages import HumanMessage, ToolMessage
 from utils.logger import get_logger
+from models.agent_capabilities import AgentCapability, CapabilityCategory
 from ultralytics import YOLO
 import cv2
 from context import get_video_context
+
+
+# ============================================================================
+# AGENT CAPABILITIES DEFINITION
+# ============================================================================
+VISION_AGENT_CAPABILITIES = AgentCapability(
+    capabilities=[
+        "Object detection in videos",
+        "Visual content analysis",
+        "People and animal detection",
+        "Vehicle and object tracking",
+        "Scene understanding",
+    ],
+    intent_keywords=[
+        # Primary keywords
+        "detect", "detection", "identify", "find",
+        "locate", "search", "spot",
+        # Objects
+        "object", "objects", "person", "people",
+        "car", "vehicle", "animal", "thing",
+        # Actions
+        "what see", "what's in", "show me",
+        "track", "follow", "movement",
+        "analyze video", "video analysis",
+        # Visual terms
+        "visual", "vision", "image", "frame",
+        "appear", "visible", "scene",
+    ],
+    categories=[
+        CapabilityCategory.VISION,
+        CapabilityCategory.ANALYSIS,
+    ],
+    example_tasks=[
+        "Detect objects in the video",
+        "Find all people in the video",
+        "What cars appear in the video?",
+        "Identify all animals in the video",
+        "Analyze what's happening in the video",
+        "Track movement of objects",
+    ],
+    routing_priority=9,  # High priority for visual/object detection requests
+)
 
 
 # Define tools for video processing
@@ -85,59 +134,59 @@ def detect_objects_in_video() -> str:
     except Exception as e:
         return f"Error processing video: {str(e)}"
 
-@tool
-def extract_text_from_video(sample_interval: int = 30, language: str = "eng") -> str:
-    """Extract text from the current video frames using OCR"""
-    try:
-        import pytesseract
-        from PIL import Image
-        import cv2
+# @tool
+# def extract_text_from_video(sample_interval: int = 30, language: str = "eng") -> str:
+#     """Extract text from the current video frames using OCR"""
+#     try:
+#         import pytesseract
+#         from PIL import Image
+#         import cv2
 
-        # Get video path from context
-        from context import get_video_context
-        video_context = get_video_context()
-        video_path = video_context.get_current_video_path()
+#         # Get video path from context
+#         from context import get_video_context
+#         video_context = get_video_context()
+#         video_path = video_context.get_current_video_path()
         
-        if not video_path:
-            return "No video file is currently loaded. Please load a video first."
+#         if not video_path:
+#             return "No video file is currently loaded. Please load a video first."
         
-        # Open video
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps * sample_interval)  # Sample every N seconds
+#         # Open video
+#         cap = cv2.VideoCapture(video_path)
+#         fps = cap.get(cv2.CAP_PROP_FPS)
+#         frame_interval = int(fps * sample_interval)  # Sample every N seconds
 
-        extracted_texts = []
-        frame_num = 0
+#         extracted_texts = []
+#         frame_num = 0
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+#         while cap.isOpened():
+#             ret, frame = cap.read()
+#             if not ret:
+#                 break
 
-            # Sample frames at intervals
-            if frame_num % frame_interval == 0:
-                # Convert BGR to RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                image = Image.fromarray(frame_rgb)
+#             # Sample frames at intervals
+#             if frame_num % frame_interval == 0:
+#                 # Convert BGR to RGB
+#                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#                 image = Image.fromarray(frame_rgb)
 
-                # Extract text
-                text = pytesseract.image_to_string(image, lang=language)
-                if text.strip():
-                    extracted_texts.append({
-                        "timestamp": frame_num / fps,
-                        "text": text.strip()
-                    })
+#                 # Extract text
+#                 text = pytesseract.image_to_string(image, lang=language)
+#                 if text.strip():
+#                     extracted_texts.append({
+#                         "timestamp": frame_num / fps,
+#                         "text": text.strip()
+#                     })
 
-            frame_num += 1
+#             frame_num += 1
 
-        cap.release()
+#         cap.release()
 
-        return f"Extracted text from {len(extracted_texts)} frames: {extracted_texts}"
+#         return f"Extracted text from {len(extracted_texts)} frames: {extracted_texts}"
 
-    except ImportError:
-        return "Tesseract not installed. Run: pip install pytesseract"
-    except Exception as e:
-        return f"Error extracting text from video: {str(e)}"
+#     except ImportError:
+#         return "Tesseract not installed. Run: pip install pytesseract"
+#     except Exception as e:
+#         return f"Error extracting text from video: {str(e)}"
 
 
 
@@ -145,22 +194,38 @@ class VisionAgent(BaseAgent):
     """Agent for vision tasks: object recognition, captioning, text/graph extraction"""
 
     def __init__(self):
+        # Use capabilities from the module-level definition
         super().__init__(
             name="vision_agent",
-            capabilities=["object_recognition", "image_captioning", "text_extraction", "graph_extraction", "ocr"]
+            capabilities=VISION_AGENT_CAPABILITIES.capabilities
         )
+        self.capability_definition = VISION_AGENT_CAPABILITIES
         self.model = get_llm_model()
+
         # Define tools directly for this agent
-        self.tools = [detect_objects_in_video, extract_text_from_video]
+        self.tools = [detect_objects_in_video]
 
         # Fallback to discovery if tools list is empty
         if not self.tools:
             self.tools = ToolDiscovery.discover_tools_in_class(self)
 
+        # Register capabilities with the registry
+        from models.agent_capabilities import AgentCapabilityRegistry
+        AgentCapabilityRegistry.register(self.name, self.capability_definition)
+
     def can_handle(self, task: Dict[str, Any]) -> bool:
-        """Check if this agent can handle the task"""
+        """Check if this agent can handle the task (legacy support)"""
+        # Legacy: Check old-style task_type
         task_type = task.get("task_type", "").lower()
-        return task_type in ["vision", "image", "ocr", "object_recognition", "captioning"]
+        if task_type in ["vision", "image", "ocr", "object_recognition", "captioning", "object_detection"]:
+            return True
+
+        # New: Check description-based intent matching
+        description = task.get("description", "")
+        if description:
+            return self.capability_definition.matches_description(description)
+
+        return False
 
     def get_model(self):
         """Get the model instance for this agent"""
@@ -283,10 +348,8 @@ class VisionAgent(BaseAgent):
         # Format tool names for the prompt - rely on descriptive function names
         formatted_tools = "\n".join([f"- {name}" for name in tool_names])
 
-        # Set video context for tools to use
+        # Video context is already set by orchestrator, just note it in the prompt
         if hasattr(task, 'file_path'):
-            video_context = get_video_context()
-            video_context.set_current_video(task.file_path)
             file_path_context = f"Working with video: {task.file_path}"
         else:
             file_path_context = ""

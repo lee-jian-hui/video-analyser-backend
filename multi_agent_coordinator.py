@@ -3,6 +3,8 @@ from agents.base_agent import BaseAgent
 from graph import MessagesState
 from langchain.messages import HumanMessage, AIMessage
 from models.task_models import TaskRequest
+from routing.intent_classifier import get_intent_classifier
+from utils.logger import get_logger
 
 
 class MultiAgentCoordinator:
@@ -11,6 +13,8 @@ class MultiAgentCoordinator:
     def __init__(self):
         self.agents: Dict[str, BaseAgent] = {}
         self.agent_capabilities: Dict[str, List[str]] = {}
+        self.intent_classifier = get_intent_classifier()
+        self.logger = get_logger(__name__)
 
     def register_agent(self, agent: BaseAgent):
         """Register a new agent with the coordinator"""
@@ -18,10 +22,26 @@ class MultiAgentCoordinator:
         self.agent_capabilities[agent.name] = agent.capabilities
 
     def route_task(self, task: Dict[str, Any]) -> Optional[BaseAgent]:
-        """Route a task to the most appropriate agent"""
+        """
+        Route a task to the most appropriate agent.
+
+        Supports both legacy task_type routing and new description-based routing.
+        """
+        # Try description-based routing first (new way)
+        description = task.get("description", "")
+        if description:
+            agent_name = self.intent_classifier.get_best_agent(description)
+            if agent_name and agent_name in self.agents:
+                self.logger.info(f"Intent-based routing: '{description}' -> {agent_name}")
+                return self.agents[agent_name]
+
+        # Fallback to legacy task_type routing
         for agent in self.agents.values():
             if agent.can_handle(task):
+                self.logger.info(f"Legacy routing: task_type '{task.get('task_type')}' -> {agent.name}")
                 return agent
+
+        self.logger.warning(f"No agent found for task: {task}")
         return None
 
     def process_request(self, request: Dict[str, Any], execution_mode: str = "single") -> Dict[str, Any]:
@@ -95,13 +115,16 @@ class MultiAgentCoordinator:
                     "agent_used": agent_name
                 }
         else:
-            # Use legacy route_task for backward compatibility
-            legacy_request = {"task_type": task_request.get_task_type()}
-            agent = self.route_task(legacy_request)
+            # NEW: Use intent-based routing from task description
+            task_dict = {
+                "description": task_request.task.description,
+                "task_type": getattr(task_request.task, 'task_type', None)
+            }
+            agent = self.route_task(task_dict)
             if not agent:
                 return {
                     "success": False,
-                    "error": "No agent available to handle this task",
+                    "error": f"No agent available to handle this task. Description: '{task_request.task.description}'",
                     "agent_used": None
                 }
 

@@ -27,9 +27,9 @@ class VideoTask(BaseTask):
     """Task model for video processing operations"""
 
     file_path: str = Field(..., description="Path to the video file to be processed")
-    task_type: Literal["object_detection", "text_extraction", "comprehensive_analysis"] = Field(
-        default="object_detection",
-        description="Type of video analysis to perform"
+    task_type: Optional[Literal["object_detection", "text_extraction", "comprehensive_analysis", "transcription"]] = Field(
+        default=None,
+        description="(Optional) Type of video analysis to perform. If not provided, will be inferred from description."
     )
     output_format: Literal["summary", "detailed", "json"] = Field(
         default="summary",

@@ -118,9 +118,6 @@ def old_run():
         m.pretty_print()
 
 
-
-
-
 def run():
     """New multi-stage orchestration entry point"""
     # Set up debug logging
@@ -143,13 +140,25 @@ def run():
     logger.info(f"Available agents: {list(orchestrator.coordinator.get_available_agents().keys())}")
 
     # Create a VideoTask using Pydantic model
+    # NEW: task_type is now optional! The system infers from description
     video_task = VideoTask(
-        description="Detect what objects are in the video",
-        file_path="./sample.mp4",
-        task_type="object_detection",
+        description="Generate the transcript for the video",
+        file_path="./subaru_vlog.mp4",
+        # task_type is optional - will be inferred from description
         output_format="summary",
         confidence_threshold=0.5
     )
+
+    # Other examples (uncomment to try):
+    # video_task = VideoTask(
+    #     description="Detect what objects are in the video",
+    #     file_path="./sample.mp4",
+    #     output_format="summary",
+    # )
+    # video_task = VideoTask(
+    #     description="Find all people and animals in the video",
+    #     file_path="./sample.mp4",
+    # )
 
     # Wrap in TaskRequest
     task_request = TaskRequest(
@@ -163,11 +172,21 @@ def run():
 
     logger.info(f"\n📋 Processing task: {video_task.get_task_description()}")
     logger.info(f"📁 File path: {video_task.file_path}")
-    logger.info(f"🎯 Task type: {video_task.task_type}")
+    logger.info(f"🎯 Task type: {video_task.task_type or '(auto-inferred from description)'}")
     logger.info(f"⚙️ Execution mode: {task_request.execution_mode}")
+
+    # Show intent classification
+    from routing.intent_classifier import get_intent_classifier
+    classifier = get_intent_classifier()
+    matches = classifier.classify(video_task.description)
+    if matches:
+        logger.info(f"🤖 Intent classification: {matches[0][0]} (confidence: {matches[0][1]:.2f})")
+
     logger.info("\n" + "="*80)
 
     # Process through multi-stage orchestration
+    # Note: Video context is automatically loaded by the orchestrator
+    # All agents will have access to the video via VideoContext
     result = orchestrator.process_task(task_request)
 
     logger.info("\n📊 ORCHESTRATION RESULTS:")
