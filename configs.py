@@ -102,6 +102,9 @@ class Config:
     OCR_LANGUAGE: str = os.getenv("OCR_LANGUAGE", "eng")
     VIDEO_SAMPLE_INTERVAL: int = int(os.getenv("VIDEO_SAMPLE_INTERVAL", "30"))
 
+    # Intent classification
+    INTENT_CONFIDENCE_THRESHOLD: float = float(os.getenv("INTENT_CONFIDENCE_THRESHOLD", "0.5"))
+
     # Orchestrator Configuration
     ENABLE_WORKFLOW_VISUALIZATION: bool = os.getenv("ENABLE_WORKFLOW_VISUALIZATION", "true").lower() == "true"
     ORCHESTRATOR_TIMEOUT: int = int(os.getenv("ORCHESTRATOR_TIMEOUT", "300"))

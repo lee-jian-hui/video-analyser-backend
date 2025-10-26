@@ -154,6 +154,11 @@ def detect_objects_in_video() -> str:
         logger.exception("Error during detect_objects_in_video")
         return f"Error processing video: {str(e)}"
 
+
+@tool
+def dummy():
+    pass
+
 # @tool
 # def extract_text_from_video(sample_interval: int = 30, language: str = "eng") -> str:
 #     """Extract text from the current video frames using OCR"""

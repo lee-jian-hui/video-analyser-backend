@@ -113,8 +113,9 @@ class MultiStageOrchestrator:
         from routing.intent_classifier import get_intent_classifier
         classifier = get_intent_classifier()
         intent_matches = classifier.classify(task_description)
+        min_conf = Config.INTENT_CONFIDENCE_THRESHOLD
 
-        if intent_matches:
+        if intent_matches and intent_matches[0][1] >= min_conf:
             selected_agents = [agent_name for agent_name, score in intent_matches[:2]]  # Top 2 agents
             self.logger.info(f"🎯 Intent-based agent selection: '{task_description}'")
             self.logger.info(f"   → Selected agents: {selected_agents} (scores: {[f'{s:.2f}' for _, s in intent_matches[:2]]})")
