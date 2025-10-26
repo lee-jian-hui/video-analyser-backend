@@ -16,16 +16,14 @@ from context import get_video_context
 
 # Define tools for video processing
 @tool
-def detect_objects_in_video(confidence_threshold: float = 0.5, model_size: str = "yolov8n") -> str:
+def detect_objects_in_video() -> str:
     """Detect objects in the current video using local YOLO model.
-    
-    Args:
-        confidence_threshold: Minimum confidence score for detections (0.0-1.0), default 0.5
-        model_size: YOLO model size ('yolov8n', 'yolov8s', 'yolov8m', 'yolov8l', 'yolov8x'), default 'yolov8n'
-        
+            
     Returns:
         Detailed summary of detected objects with counts and confidence scores
     """
+    confidence_threshold: float = 0.5
+    model_size: str = "yolov8n"
     try:
 
         # Load YOLO model using model manager

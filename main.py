@@ -26,8 +26,8 @@ def initialize_model():
     model = get_llm_model(os.getenv("GEMINI_API_KEY"))
     return inject_llm_tools(model)
 
-
 def create_llm_call(model_with_tools):
+
     """Create llm_call function with the model"""
     def llm_call(state: dict):
         """LLM decides whether to call a tool or not"""

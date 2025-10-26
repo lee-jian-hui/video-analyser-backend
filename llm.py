@@ -14,44 +14,126 @@ def get_llm_model() -> BaseChatModel:
 
 def get_function_calling_llm() -> BaseChatModel:
     """Get LLM optimized for function calling and tool use"""
-    if Config.USE_LOCAL_FUNCTION_CALLING:
-        return _get_local_function_calling_llm()
+    # Handle legacy config first
+    if Config.USE_OLLAMA:
+        backend = "ollama"
+    elif Config.USE_LOCAL_FUNCTION_CALLING or Config.USE_LOCAL_LLM:
+        backend = "local"
     else:
-        return _get_gemini_model()
+        backend = Config.FUNCTION_CALLING_BACKEND
+
+    # Route based on backend
+    if backend == "ollama":
+        return _get_ollama_model(model_type="function_calling")
+    elif backend == "local":
+        return _get_local_model(model_type="function_calling")
+    elif backend == "remote":
+        return _get_remote_model()
+    else:
+        raise ValueError(f"Unknown FUNCTION_CALLING_BACKEND: {backend}. Use 'ollama', 'local', or 'remote'")
 
 def get_chat_llm() -> BaseChatModel:
     """Get LLM optimized for conversational responses"""
+    # Handle legacy config first
     if Config.USE_LOCAL_CHAT:
-        return _get_local_chat_llm()
+        backend = "local"
     else:
-        return _get_gemini_model()
+        backend = Config.CHAT_BACKEND
 
-def _get_gemini_model():
+    # Route based on backend
+    if backend == "ollama":
+        return _get_ollama_model(model_type="chat")
+    elif backend == "local":
+        return _get_local_model(model_type="chat")
+    elif backend == "remote":
+        return _get_remote_model()
+    else:
+        raise ValueError(f"Unknown CHAT_BACKEND: {backend}. Use 'ollama', 'local', or 'remote'")
+
+def _get_remote_model() -> BaseChatModel:
+    """Get remote cloud API model (Gemini, OpenAI, etc.)"""
     api_key = Config.GEMINI_API_KEY
-    model_config = Config.get_model_config()
+
+    # Use new config or fallback to legacy
+    provider = Config.REMOTE_PROVIDER or Config.MODEL_PROVIDER
+    model_name = Config.REMOTE_MODEL_NAME or Config.MODEL_NAME
+    temperature = Config.REMOTE_TEMPERATURE or Config.MODEL_TEMPERATURE
 
     return init_chat_model(
-        model_config["model_name"],
-        model_provider=model_config["model_provider"],
-        temperature=model_config["temperature"],
+        model_name,
+        model_provider=provider,
+        temperature=temperature,
         api_key=api_key
     )
 
+# Legacy alias
+def _get_gemini_model():
+    """Legacy function - use _get_remote_model() instead"""
+    return _get_remote_model()
 
-def _get_local_llm() -> BaseChatModel:
-    """Get local Llama model using HuggingFace transformers"""
+
+def _get_ollama_model(model_type: str = "function_calling") -> BaseChatModel:
+    """Get Ollama-served model using ChatOllama
+
+    Args:
+        model_type: "function_calling" or "chat" to select appropriate model
+    """
+    try:
+        from langchain_ollama import ChatOllama
+
+        # Select model based on type
+        if model_type == "function_calling":
+            model_name = Config.OLLAMA_FUNCTION_CALLING_MODEL
+        else:  # chat
+            model_name = Config.OLLAMA_CHAT_MODEL
+
+        print(f"Creating Ollama {model_type} model: {model_name}")
+        print(f"Connecting to Ollama at: {Config.OLLAMA_BASE_URL}")
+
+        chat_model = ChatOllama(
+            model=model_name,
+            base_url=Config.OLLAMA_BASE_URL,
+            temperature=Config.OLLAMA_TEMPERATURE,
+        )
+
+        return chat_model
+
+    except Exception as e:
+        print(f"Failed to initialize Ollama model: {e}")
+        print("Falling back to remote model...")
+        return _get_remote_model()
+
+
+def _get_local_model(model_type: str = "function_calling") -> BaseChatModel:
+    """Get local model using HuggingFace transformers pipeline
+
+    Args:
+        model_type: "function_calling" or "chat" to select appropriate model
+    """
+    # Select model based on type
+    if model_type == "function_calling":
+        model_name_config = (Config.LOCAL_FUNCTION_CALLING_MODEL or
+                           Config.FUNCTION_CALLING_MODEL_TYPE or
+                           Config.LOCAL_MODEL_TYPE).lower()
+    else:  # chat
+        model_name_config = (Config.LOCAL_CHAT_MODEL or
+                           Config.CHAT_MODEL_TYPE or
+                           Config.LOCAL_MODEL_TYPE).lower()
 
     try:
         # Get model manager and load the configured local model
         model_manager = get_model_manager()
 
-        if Config.LOCAL_MODEL_TYPE.lower() == "codellama":
+        if model_name_config == "codellama":
             components = model_manager.get_codellama_model()
             model_name = "CodeLlama"
-        elif Config.LOCAL_MODEL_TYPE.lower() == "qwen":
+        elif model_name_config == "qwen":
             components = model_manager.get_qwen_1_5_b_model()
-            model_name = "Qwen"
-        elif Config.LOCAL_MODEL_TYPE.lower() == "phi3":
+            model_name = "Qwen2.5-Coder-1.5B"
+        elif model_name_config == "qwen3":
+            components = model_manager.get_qwen3_1_7b_model()
+            model_name = "Qwen3-1.7B"
+        elif model_name_config == "phi3":
             components = model_manager.get_phi3_model()
             model_name = "Phi-3"
         else:
@@ -65,13 +147,14 @@ def _get_local_llm() -> BaseChatModel:
         tokenizer = components["tokenizer"]
 
         # Create text generation pipeline with config
-        print(f"Creating {model_name} pipeline with max_tokens={Config.MAX_NEW_TOKENS}")
+        temperature = Config.LOCAL_TEMPERATURE
+        print(f"Creating {model_name} pipeline with max_tokens={Config.MAX_NEW_TOKENS}, temperature={temperature}")
         text_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
             max_new_tokens=Config.MAX_NEW_TOKENS,
-            temperature=0.7,
+            temperature=temperature,
             do_sample=True,
             return_full_text=False
         )
@@ -85,61 +168,19 @@ def _get_local_llm() -> BaseChatModel:
         return chat_model
 
     except Exception as e:
-        print(f"Failed to initialize local LLM: {e}")
-        print("Falling back to Gemini model...")
-        return _get_gemini_model()
+        print(f"Failed to initialize local model: {e}")
+        print("Falling back to remote model...")
+        return _get_remote_model()
+
+
+# Legacy function aliases
+def _get_local_llm() -> BaseChatModel:
+    """Legacy function - use _get_local_model() instead"""
+    return _get_local_model()
 
 def _get_local_function_calling_llm() -> BaseChatModel:
-    """Get local LLM optimized for function calling (structured reasoning)"""
-    try:
-        model_manager = get_model_manager()
-        
-        # Use models good at structured output for function calling
-        function_model_type = Config.FUNCTION_CALLING_MODEL_TYPE.lower()
-        
-        if function_model_type == "codellama":
-            components = model_manager.get_codellama_model()
-            model_name = "CodeLlama"
-        elif function_model_type in ["codellama_4bit", "codellama_awq"]:
-            components = model_manager.get_codellama_4bit_model()
-            model_name = "CodeLlama-4bit"
-        elif function_model_type == "qwen":
-            components = model_manager.get_qwen_1_5_b_model()
-            model_name = "Qwen2.5-Coder-1.5B"
-        elif function_model_type == "qwen3":
-            components = model_manager.get_qwen3_1_7b_model()
-            model_name = "Qwen3-1.7B"
-        elif function_model_type == "gemini":
-            return _get_gemini_model()
-        else:
-            components = model_manager.get_llama_model()
-            model_name = "Llama"
-
-        if components is None:
-            raise Exception(f"Failed to load {model_name} model for function calling")
-
-        model = components["model"]
-        tokenizer = components["tokenizer"]
-
-        print(f"Creating {model_name} function calling pipeline")
-        text_pipeline = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=Config.MAX_NEW_TOKENS,
-            temperature=0.1,  # Lower temperature for structured output
-            do_sample=True,
-            return_full_text=False
-        )
-
-        pipeline_llm = HuggingFacePipeline(pipeline=text_pipeline)
-        chat_model = ChatHuggingFace(llm=pipeline_llm)
-        return chat_model
-
-    except Exception as e:
-        print(f"Failed to initialize function calling LLM: {e}")
-        print("Falling back to Gemini model...")
-        return _get_gemini_model()
+    """Legacy function - use _get_local_model() instead"""
+    return _get_local_model()
 
 def _get_local_chat_llm() -> BaseChatModel:
     """Get local LLM optimized for conversational responses"""

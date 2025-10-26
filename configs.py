@@ -50,18 +50,38 @@ class Config:
         "[%(asctime)s] %(name)s - %(levelname)s - %(message)s"
     )
 
-    # Model Configuration
+    # Model Configuration - Unified Backend System
+    # MODEL_BACKEND options: "ollama", "local", "remote"
+    # Separate backends for function calling and chat
+    FUNCTION_CALLING_BACKEND: str = os.getenv("FUNCTION_CALLING_BACKEND", "remote").lower()
+    CHAT_BACKEND: str = os.getenv("CHAT_BACKEND", "remote").lower()
+
+    # Remote (Cloud API) Configuration
+    REMOTE_PROVIDER: str = os.getenv("REMOTE_PROVIDER", "google_genai")
+    REMOTE_MODEL_NAME: str = os.getenv("REMOTE_MODEL_NAME", "gemini-2.0-flash-lite")
+    REMOTE_TEMPERATURE: float = float(os.getenv("REMOTE_TEMPERATURE", "0.0"))
+
+    # Ollama (Served Local) Configuration
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_FUNCTION_CALLING_MODEL: str = os.getenv("OLLAMA_FUNCTION_CALLING_MODEL", "qwen3:0.6b")
+    OLLAMA_CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:0.6b")
+    OLLAMA_TEMPERATURE: float = float(os.getenv("OLLAMA_TEMPERATURE", "0.1"))
+
+    # Local (Transformers Pipeline) Configuration
+    LOCAL_FUNCTION_CALLING_MODEL: str = os.getenv("LOCAL_FUNCTION_CALLING_MODEL", "qwen3")  # "llama", "codellama", "qwen", "qwen3", "phi3"
+    LOCAL_CHAT_MODEL: str = os.getenv("LOCAL_CHAT_MODEL", "qwen3")  # "llama", "codellama", "qwen", "qwen3", "phi3"
+    LOCAL_TEMPERATURE: float = float(os.getenv("LOCAL_TEMPERATURE", "0.1"))
+
+    # Legacy support (deprecated but still works)
     USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
-    LOCAL_MODEL_TYPE: str = os.getenv("LOCAL_MODEL_TYPE", "llama")  # "llama" or "codellama"
-    MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER", "google_genai")
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "gemini-2.0-flash-lite")
+    USE_LOCAL_FUNCTION_CALLING: bool = os.getenv("USE_LOCAL_FUNCTION_CALLING", "false").lower() == "true"
+    USE_LOCAL_CHAT: bool = os.getenv("USE_LOCAL_CHAT", "false").lower() == "true"
+    USE_OLLAMA: bool = os.getenv("USE_OLLAMA", "false").lower() == "true"
+    MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER", "google_genai")  # Alias for REMOTE_PROVIDER
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "gemini-2.0-flash-lite")  # Alias for REMOTE_MODEL_NAME
     MODEL_TEMPERATURE: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
-    
-    # Separate Function Calling and Chat Models
     FUNCTION_CALLING_MODEL_TYPE: str = os.getenv("FUNCTION_CALLING_MODEL_TYPE", "gemini")
     CHAT_MODEL_TYPE: str = os.getenv("CHAT_MODEL_TYPE", "phi3")
-    USE_LOCAL_FUNCTION_CALLING: bool = os.getenv("USE_LOCAL_FUNCTION_CALLING", "false").lower() == "true"
-    USE_LOCAL_CHAT: bool = os.getenv("USE_LOCAL_CHAT", "true").lower() == "true"
 
     # Local Model Hardware Configuration
     DEVICE_MAP: str = os.getenv("DEVICE_MAP", "cpu")  # "cpu", "auto", "cuda", etc.

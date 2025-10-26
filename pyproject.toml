@@ -13,6 +13,7 @@ dependencies = [
     "langchain-community>=0.4",
     "langchain-google-genai>=3.0.0",
     "langchain-huggingface>=1.0.0",
+    "langchain-ollama>=1.0.0",
     "langgraph>=1.0.1",
     "litellm>=1.79.0",
     "mcp>=1.19.0",
