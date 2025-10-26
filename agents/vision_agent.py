@@ -19,6 +19,7 @@ from models.agent_capabilities import AgentCapability, CapabilityCategory
 from ultralytics import YOLO
 import cv2
 from context import get_video_context
+from storage_paths import get_outputs_dir
 
 
 # ============================================================================
@@ -73,6 +74,7 @@ def detect_objects_in_video() -> str:
     """
     confidence_threshold: float = 0.5
     model_size: str = "yolov8n"
+    logger = get_logger(__name__)
     try:
 
         # Load YOLO model using model manager
@@ -94,13 +96,24 @@ def detect_objects_in_video() -> str:
         all_detections = []
         frame_num = 0
 
+        project_dir = get_outputs_dir()
+        project_dir.mkdir(parents=True, exist_ok=True)
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
             # Run inference on frame
-            results = model(frame, conf=confidence_threshold, verbose=False)
+            results = model(
+                frame,
+                conf=confidence_threshold,
+                verbose=False,
+                save=False,
+                project=str(project_dir / "yolo_runs"),
+                name="vision_agent",
+                exist_ok=True,
+            )
 
             frame_detections = []
             for r in results:
@@ -127,11 +140,18 @@ def detect_objects_in_video() -> str:
 
         # Summarize detections
         unique_classes = set(det["class"] for det in all_detections)
+        logger.info(
+            "Vision agent detection complete: %d detections, classes=%s",
+            len(all_detections),
+            list(unique_classes),
+        )
         return f"Video analysis complete. {len(all_detections)} detections across {frame_count} frames. Detected classes: {list(unique_classes)}"
 
     except ImportError:
+        logger.exception("YOLO not installed")
         return "YOLO not installed. Run: pip install ultralytics"
     except Exception as e:
+        logger.exception("Error during detect_objects_in_video")
         return f"Error processing video: {str(e)}"
 
 # @tool

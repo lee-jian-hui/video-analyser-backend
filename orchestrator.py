@@ -80,6 +80,13 @@ class MultiStageOrchestrator:
         except Exception as e:
             self.logger.error(f"Failed to register default VisionAgent: {e}")
 
+        try:
+            from agents.transcription_agent import TranscriptionAgent
+            self.coordinator.register_agent(TranscriptionAgent())
+            self.logger.info("Successfully registered default TranscriptionAgent")
+        except Exception as e:
+            self.logger.error(f"Failed to register default TranscriptionAgent: {e}")
+
     def _build_workflow(self) -> StateGraph:
         """Build workflow using idiomatic Command pattern"""
         workflow = StateGraph(OrchestratorState)

@@ -91,7 +91,9 @@ class FileStorage:
         if copy_file:
             safe_name = self._sanitize_filename(display_name)
             suffix = Path(display_name).suffix or path.suffix or ""
-            dest_path = self.base_dir / f"{file_id}_{safe_name}{suffix}"
+            if suffix and not safe_name.lower().endswith(suffix.lower()):
+                safe_name = f"{safe_name}{suffix}"
+            dest_path = self.base_dir / f"{file_id}_{safe_name}"
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, dest_path)
             tracked_path = dest_path
