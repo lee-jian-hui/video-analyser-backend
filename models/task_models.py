@@ -73,21 +73,15 @@ class VideoTask(BaseTask):
 
     def get_task_description(self) -> str:
         """Generate a natural language task description"""
-        task_descriptions = {
-            "object_detection": "Detect and identify objects in the video",
-            "text_extraction": "Extract text content from the video frames",
-            "comprehensive_analysis": "Perform comprehensive analysis including object detection, text extraction, and content summarization"
-        }
-        return f"{task_descriptions[self.task_type]}: {self.description}"
+        # Use the description directly instead of predefined mappings
+        # This allows for more flexible, natural language task descriptions
+        return self.description
 
     def get_required_tools(self) -> List[str]:
-        """Get list of tools required for this task type"""
-        tool_mapping = {
-            "object_detection": ["detect_objects_in_video"],
-            "text_extraction": ["extract_text_from_video"],
-            "comprehensive_analysis": ["detect_objects_in_video", "extract_text_from_video"]
-        }
-        return tool_mapping[self.task_type]
+        """Get list of tools required for this task type - deprecated, let LLM decide"""
+        # Return empty list to let the LLM dynamically select tools based on task description
+        # This removes rigid tool-to-task mappings and allows for more flexibility
+        return []
 
 
 class ImageTask(BaseTask):

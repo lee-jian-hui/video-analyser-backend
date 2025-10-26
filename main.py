@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os 
 
 
+from configs import Config
 from graph import MessagesState
 from tools import inject_llm_tools
 from llm import get_llm_model
@@ -153,7 +154,7 @@ def run():
     # Wrap in TaskRequest
     task_request = TaskRequest(
         task=video_task,
-        execution_mode="chain"
+        execution_mode=Config.EXECUTION_MODE
     )
 
     # Alternative tasks (commented out):

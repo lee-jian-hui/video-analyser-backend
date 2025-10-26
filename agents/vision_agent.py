@@ -11,12 +11,21 @@ from langchain.messages import HumanMessage, ToolMessage
 from utils.logger import get_logger
 from ultralytics import YOLO
 import cv2
+from context import get_video_context
 
 
 # Define tools for video processing
 @tool
-def detect_objects_in_video(video_path: str, confidence_threshold: float = 0.5, model_size: str = "yolov8n") -> str:
-    """Detect objects in video using local YOLO model"""
+def detect_objects_in_video(confidence_threshold: float = 0.5, model_size: str = "yolov8n") -> str:
+    """Detect objects in the current video using local YOLO model.
+    
+    Args:
+        confidence_threshold: Minimum confidence score for detections (0.0-1.0), default 0.5
+        model_size: YOLO model size ('yolov8n', 'yolov8s', 'yolov8m', 'yolov8l', 'yolov8x'), default 'yolov8n'
+        
+    Returns:
+        Detailed summary of detected objects with counts and confidence scores
+    """
     try:
 
         # Load YOLO model using model manager
@@ -24,6 +33,12 @@ def detect_objects_in_video(video_path: str, confidence_threshold: float = 0.5, 
         model_manager = get_model_manager()
         model = model_manager.get_yolo_model(f'{model_size}.pt')
 
+        video_context = get_video_context()
+        video_path = video_context.get_current_video_path()
+        
+        if not video_path:
+            return "No video file is currently loaded. Please load a video first."
+        
         # Open video
         cap = cv2.VideoCapture(video_path)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -73,13 +88,21 @@ def detect_objects_in_video(video_path: str, confidence_threshold: float = 0.5, 
         return f"Error processing video: {str(e)}"
 
 @tool
-def extract_text_from_video(video_path: str, sample_interval: int = 30, language: str = "eng") -> str:
-    """Extract text from video frames using OCR"""
+def extract_text_from_video(sample_interval: int = 30, language: str = "eng") -> str:
+    """Extract text from the current video frames using OCR"""
     try:
         import pytesseract
         from PIL import Image
         import cv2
 
+        # Get video path from context
+        from context import get_video_context
+        video_context = get_video_context()
+        video_path = video_context.get_current_video_path()
+        
+        if not video_path:
+            return "No video file is currently loaded. Please load a video first."
+        
         # Open video
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -151,11 +174,11 @@ class VisionAgent(BaseAgent):
         logger = get_logger(__name__)
         content = state["messages"][-1].content
 
-        # Get available tool descriptions
-        tool_descriptions = {tool.name: tool.description for tool in self.get_tools()}
+        # Get available tool names (function names are descriptive)
+        tool_names = [tool.name for tool in self.get_tools()]
 
-        # Format tool descriptions for the prompt
-        formatted_tools = "\n".join([f"- {name}: {desc}" for name, desc in tool_descriptions.items()])
+        # Format tool names for the prompt - rely on descriptive function names
+        formatted_tools = "\n".join([f"- {name}" for name in tool_names])
 
         # Use template prompt
         prompt = VisionAgentPrompts.format_tool_execution_prompt(
@@ -256,14 +279,19 @@ class VisionAgent(BaseAgent):
         task = task_request.task
         task_description = task.get_task_description()
 
-        # Get available tool descriptions
-        tool_descriptions = {tool.name: tool.description for tool in self.get_tools()}
+        # Get available tool names (function names are descriptive)
+        tool_names = [tool.name for tool in self.get_tools()]
 
-        # Format tool descriptions for the prompt
-        formatted_tools = "\n".join([f"- {name}: {desc}" for name, desc in tool_descriptions.items()])
+        # Format tool names for the prompt - rely on descriptive function names
+        formatted_tools = "\n".join([f"- {name}" for name in tool_names])
 
-        # Add file path context
-        file_path_context = f"File to process: {task.file_path}" if hasattr(task, 'file_path') else ""
+        # Set video context for tools to use
+        if hasattr(task, 'file_path'):
+            video_context = get_video_context()
+            video_context.set_current_video(task.file_path)
+            file_path_context = f"Working with video: {task.file_path}"
+        else:
+            file_path_context = ""
 
         # Use template prompt
         prompt = VisionAgentPrompts.format_tool_execution_prompt(
@@ -297,10 +325,7 @@ class VisionAgent(BaseAgent):
                         tool_name = tool_call["name"]
                         tool_args = tool_call["args"]
 
-                        # Use the file path from the task if video_path is not provided
-                        if tool_name in ["detect_objects_in_video", "extract_text_from_video"]:
-                            if "video_path" not in tool_args and hasattr(task, 'file_path'):
-                                tool_args["video_path"] = task.file_path
+                        # Video path is handled by context now, no need to inject it
 
                         logger.debug(f"Calling tool: {tool_name} with args: {tool_args}")
 

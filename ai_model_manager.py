@@ -13,6 +13,52 @@ class AIModelType(Enum):
     OBJECT_DETECTION = "object_detection"  # YOLO for object detection
     LLM = "llm"                       # Language model (Llama/CodeLlama/Gemini)
 
+
+class ModelType(Enum):
+    """Model types by primary capability"""
+    TRANSCRIPTION = "transcription"
+    OBJECT_DETECTION = "object_detection"
+    LLM_FUNCTION_CALLING = "llm_function_calling"
+    LLM_CHAT = "llm_chat"
+    LLM_GENERAL = "llm_general"
+
+
+class ModelSize(Enum):
+    """Model size categories"""
+    TINY = "tiny"       # < 1B parameters
+    SMALL = "small"     # 1-3B parameters  
+    MEDIUM = "medium"   # 3-7B parameters
+    LARGE = "large"     # 7-15B parameters
+    XLARGE = "xlarge"   # > 15B parameters
+
+
+class SupportedModels(Enum):
+    """Hardcoded list of all supported models"""
+    # Transcription Models
+    WHISPER_TINY = "whisper_tiny"
+    WHISPER_BASE = "whisper_base"
+    WHISPER_SMALL = "whisper_small"
+    WHISPER_MEDIUM = "whisper_medium"
+    WHISPER_LARGE = "whisper_large"
+    
+    # Object Detection Models
+    YOLOV8N = "yolov8n"
+    YOLOV8S = "yolov8s"
+    YOLOV8M = "yolov8m"
+    YOLOV8L = "yolov8l"
+    YOLOV8X = "yolov8x"
+    
+    # LLM Models
+    LLAMA3_2_1B = "llama3_2_1b"
+    CODELLAMA_7B = "codellama_7b"
+    CODELLAMA_7B_4BIT = "codellama_7b_4bit"
+    QWEN_CODER_1_5B = "qwen_coder_1_5b"
+    QWEN3_1_7B = "qwen3_1_7b"
+    PHI3_MINI = "phi3_mini"
+    
+    # Remote Models
+    GEMINI_FLASH = "gemini_flash"
+
 class AIModelManager:
     """Manages AI model downloads and caching for all agents"""
 
@@ -168,17 +214,31 @@ class AIModelManager:
             return False
 
     def _initialize_qwen(self) -> bool:
-        """Initialize Qwen model - cache it for later use"""
+        """Initialize Qwen2.5-Coder-1.5B model - cache it for later use"""
         try:
-            self.logger.info("Downloading Qwen model to cache...")
+            self.logger.info("Downloading Qwen2.5-Coder-1.5B model to cache...")
             result = self.get_qwen_1_5_b_model()
             if result:
-                self.logger.info("✅ Qwen model cached successfully")
+                self.logger.info("✅ Qwen2.5-Coder-1.5B model cached successfully")
                 return True
             else:
                 return False
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize Qwen: {e}")
+            self.logger.error(f"❌ Failed to initialize Qwen2.5-Coder-1.5B: {e}")
+            return False
+
+    def _initialize_qwen3(self) -> bool:
+        """Initialize Qwen3-1.7B model - cache it for later use"""
+        try:
+            self.logger.info("Downloading Qwen3-1.7B model to cache...")
+            result = self.get_qwen3_1_7b_model()
+            if result:
+                self.logger.info("✅ Qwen3-1.7B model cached successfully")
+                return True
+            else:
+                return False
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Qwen3-1.7B: {e}")
             return False
 
     def _initialize_phi3(self) -> bool:
@@ -195,16 +255,34 @@ class AIModelManager:
             self.logger.error(f"❌ Failed to initialize Phi-3: {e}")
             return False
 
+    def _initialize_codellama_4bit(self) -> bool:
+        """Initialize CodeLlama 4-bit model - cache it for later use"""
+        try:
+            self.logger.info("Downloading CodeLlama 4-bit model to cache...")
+            result = self.get_codellama_4bit_model()
+            if result:
+                self.logger.info("✅ CodeLlama 4-bit model cached successfully")
+                return True
+            else:
+                return False
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize CodeLlama 4-bit: {e}")
+            return False
+
     def _initialize_local_llm(self) -> bool:
         """Initialize the configured local LLM"""
         local_model_type = Config.LOCAL_MODEL_TYPE.lower()
 
         if local_model_type == "codellama":
             return self._initialize_codellama()
+        elif local_model_type == "codellama_4bit":
+            return self._initialize_codellama_4bit()
         elif local_model_type == "llama":
             return self._initialize_llama()
         elif local_model_type == "qwen":
             return self._initialize_qwen()
+        elif local_model_type == "qwen3":
+            return self._initialize_qwen3()
         elif local_model_type == "phi3":
             return self._initialize_phi3()
         else:
@@ -339,7 +417,7 @@ class AIModelManager:
             return None
 
     def get_qwen_1_5_b_model(self):
-        """Get Qwen2.5-Coder model and tokenizer"""
+        """Get Qwen2.5-Coder-1.5B model and tokenizer"""
         try:
             from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
             import torch
@@ -348,7 +426,7 @@ class AIModelManager:
             cache_dir = Path(Config.get_ml_model_cache_dir()) / "qwen-coder-1.5b"
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-            # 4-bit quantization config (same as test.py)
+            # 4-bit quantization config
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
@@ -363,7 +441,7 @@ class AIModelManager:
                 trust_remote_code=True
             )
             
-            # Set chat template (same as test.py)
+            # Set chat template
             if tokenizer.chat_template is None:
                 tokenizer.chat_template = (
                     "{% for message in messages %}"
@@ -385,7 +463,58 @@ class AIModelManager:
             return {"model": model, "tokenizer": tokenizer}
 
         except Exception as e:
-            self.logger.error(f"Failed to load Qwen model: {e}")
+            self.logger.error(f"Failed to load Qwen2.5-Coder-1.5B model: {e}")
+            return None
+
+    def get_qwen3_1_7b_model(self):
+        """Get Qwen3-1.7B model and tokenizer"""
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+            import torch
+
+            model_name = "Qwen/Qwen3-1.7B"
+            cache_dir = Path(Config.get_ml_model_cache_dir()) / "qwen3-1.7b"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # 4-bit quantization config for smaller memory footprint
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True
+            )
+            
+            # Set chat template for Qwen3
+            if tokenizer.chat_template is None:
+                tokenizer.chat_template = (
+                    "{% for message in messages %}"
+                    "{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n'}}"
+                    "{% endfor %}"
+                    "{% if add_generation_prompt %}{{'<|im_start|>assistant\\n'}}{% endif %}"
+                )
+                tokenizer.save_pretrained(cache_dir)
+
+            # Load model with quantization
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                device_map=Config.DEVICE_MAP,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+                torch_dtype=torch.float16,
+            )
+
+            return {"model": model, "tokenizer": tokenizer}
+
+        except Exception as e:
+            self.logger.error(f"Failed to load Qwen3-1.7B model: {e}")
             return None
 
     def get_phi3_model(self):
@@ -430,6 +559,48 @@ class AIModelManager:
 
         except Exception as e:
             self.logger.error(f"Failed to load Phi-3 model: {e}")
+            return None
+
+    def get_codellama_4bit_model(self):
+        """Get CodeLlama 4-bit quantized model for function calling"""
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+            import torch
+
+            model_name = "codellama/CodeLlama-7b-Instruct-hf"
+            cache_dir = Path(Config.get_ml_model_cache_dir()) / "codellama-4bit-7b"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # 4-bit quantization config optimized for function calling with CPU offload
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+                llm_int8_enable_fp32_cpu_offload=True,  # Enable CPU offload for insufficient GPU RAM
+            )
+
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True,
+            )
+            
+            # Load model with 4-bit quantization
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=str(cache_dir),
+                device_map=Config.DEVICE_MAP,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+                torch_dtype=torch.float16,
+            )
+
+            return {"model": model, "tokenizer": tokenizer}
+
+        except Exception as e:
+            self.logger.error(f"Failed to load CodeLlama 4-bit model: {e}")
             return None
 
     def get_model_status(self) -> Dict[str, Dict[str, Any]]:

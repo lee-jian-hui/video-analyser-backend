@@ -14,26 +14,26 @@ class VisionAgentPrompts:
 
 Task: {task_content}
 
-Use the appropriate tools to handle the vision task. Call the relevant tool functions directly.
+CRITICAL: You are a tool-calling agent. You MUST call the provided tools directly. Never generate code, scripts, or manual instructions. Only use tool calls to complete tasks.
 """
 
     TOOL_EXECUTION_PROMPT = """You are a vision analysis agent specialized in image and video processing.
 
-Available tools:
+Available tools (function names are self-descriptive):
 {tool_descriptions}
 
 Current task: {task_content}
 {file_path_context}
 
-Instructions:
-- Use the tools provided to complete the vision analysis task
-- Call tools with appropriate parameters based on the task requirements
-- Process results thoroughly and provide meaningful analysis
+IMPORTANT INSTRUCTIONS:
+- You MUST use the available tools by calling them directly - DO NOT generate code or bash commands
+- DO NOT write Python scripts or installation commands
+- DO NOT provide manual instructions
+- ONLY call the provided tools with the correct parameters
 - Use the provided file path when calling tools that require file input
-- For video analysis, use detect_objects_in_video for object detection
-- For text extraction from videos, use extract_text_from_video
+- Choose the most appropriate tool based on the descriptive function name and your task
 
-Execute the appropriate tools now to complete the task."""
+Call the appropriate tools NOW to complete the task. Do not explain what you will do, just call the tools."""
 
     ERROR_RESPONSE = """I encountered an error while processing your vision task: {error_message}
 

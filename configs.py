@@ -36,6 +36,7 @@ class Config:
             # Development - use local directory
             return os.getenv("ML_MODEL_CACHE_DIR", "./ml-models")
 
+    EXECUTION_MODE = "single"
     ML_MODEL_CACHE_DIR: str = get_ml_model_cache_dir()
 
     # API Keys

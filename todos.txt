@@ -1,3 +1,12 @@
 error handling / human in the loop
 
 Explicit Node Return Types for graph nodes
+
+
+
+> i also noticed that the tools do not output the function 
+  signature and description of the arguments to the context 
+  window, what can we do thjere
+
+
+chat history

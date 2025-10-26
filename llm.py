@@ -100,9 +100,15 @@ def _get_local_function_calling_llm() -> BaseChatModel:
         if function_model_type == "codellama":
             components = model_manager.get_codellama_model()
             model_name = "CodeLlama"
+        elif function_model_type in ["codellama_4bit", "codellama_awq"]:
+            components = model_manager.get_codellama_4bit_model()
+            model_name = "CodeLlama-4bit"
         elif function_model_type == "qwen":
             components = model_manager.get_qwen_1_5_b_model()
-            model_name = "Qwen"
+            model_name = "Qwen2.5-Coder-1.5B"
+        elif function_model_type == "qwen3":
+            components = model_manager.get_qwen3_1_7b_model()
+            model_name = "Qwen3-1.7B"
         elif function_model_type == "gemini":
             return _get_gemini_model()
         else:
@@ -151,7 +157,10 @@ def _get_local_chat_llm() -> BaseChatModel:
             model_name = "Llama"
         elif chat_model_type == "qwen":
             components = model_manager.get_qwen_1_5_b_model()
-            model_name = "Qwen"
+            model_name = "Qwen2.5-Coder-1.5B"
+        elif chat_model_type == "qwen3":
+            components = model_manager.get_qwen3_1_7b_model()
+            model_name = "Qwen3-1.7B"
         elif chat_model_type == "gemini":
             return _get_gemini_model()
         else:
