@@ -109,6 +109,7 @@ class Config:
     # Orchestrator Configuration
     ENABLE_WORKFLOW_VISUALIZATION: bool = os.getenv("ENABLE_WORKFLOW_VISUALIZATION", "true").lower() == "true"
     ORCHESTRATOR_TIMEOUT: int = int(os.getenv("ORCHESTRATOR_TIMEOUT", "300"))
+    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))  # Maximum retries for agent selection and planning
 
 
     @classmethod
