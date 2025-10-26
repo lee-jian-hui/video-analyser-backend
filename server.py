@@ -17,6 +17,8 @@ import json
 
 # Import services
 from services.file_storage import FileStorage
+from services.chat_history_storage import get_chat_history_storage
+from models.chat_history import ChatHistory
 from context.video_context import get_video_context
 
 # Import orchestrator
@@ -41,6 +43,9 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
 
         # Initialize file storage (OS-appropriate directories)
         self.file_storage = FileStorage()
+
+        # Initialize chat history storage
+        self.chat_storage = get_chat_history_storage()
 
         # Initialize video context (singleton)
         self.video_context = get_video_context()
@@ -89,6 +94,13 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
             # Update video context
             self.video_context.set_current_video(file_path)
 
+            # Save as last video in app state
+            self.chat_storage.save_app_state({
+                "last_video_id": file_id,
+                "last_video_path": file_path,
+                "last_video_name": filename
+            })
+
             logger.info(f"✅ Upload successful: {filename} → {file_id}")
             logger.info(f"   Saved to: {file_path}")
 
@@ -116,6 +128,13 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 display_name=request.display_name or None,
                 copy_file=not request.reference_only,
             )
+
+            # Save as last video in app state
+            self.chat_storage.save_app_state({
+                "last_video_id": metadata["file_id"],
+                "last_video_path": metadata["stored_path"],
+                "last_video_name": metadata["display_name"]
+            })
 
             return video_analyzer_pb2.RegisterVideoResponse(
                 file_id=metadata["file_id"],
