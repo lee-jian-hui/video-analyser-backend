@@ -2,6 +2,9 @@
 - WSL Linux Ubuntu 22.04
 - Python 3.10.12
 
+## video files used in testing:
+- https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4
+- https://file-examples.com/wp-content/storage/2017/04/file_example_MP4_480_1_5MG.mp4
 
 ## PRE-REQ
 
