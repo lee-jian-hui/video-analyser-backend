@@ -25,7 +25,12 @@ class LoggerManager:
         from configs import Config
 
         # Use config defaults if not provided
-        level = level or Config.LOG_LEVEL
+        level = (level or Config.LOG_LEVEL).upper()
+        valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+        if level not in valid_levels:
+            print(f"[logger] Warning: invalid LOG_LEVEL '{level}', defaulting to INFO")
+            level = "INFO"
+            
         log_file = log_file or Config.LOG_FILE
         format_string = format_string or Config.LOG_FORMAT
 
@@ -35,7 +40,7 @@ class LoggerManager:
             handlers.append(logging.FileHandler(log_file))
 
         logging.basicConfig(
-            level=getattr(logging, level.upper()),
+            level=getattr(logging, level),
             format=format_string,
             handlers=handlers,
             force=True  # Override any existing configuration

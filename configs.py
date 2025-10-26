@@ -33,7 +33,7 @@ class Config:
             return str(bundle_dir)
 
         else:
-            # Development - use local directory
+            # pment - use local directory
             return os.getenv("ML_MODEL_CACHE_DIR", "./ml-models")
 
     EXECUTION_MODE = "single"
@@ -104,6 +104,7 @@ class Config:
 
     # Intent classification
     INTENT_CONFIDENCE_THRESHOLD: float = float(os.getenv("INTENT_CONFIDENCE_THRESHOLD", "0.5"))
+    USE_INTENT_ROUTING: bool = os.getenv("USE_INTENT_ROUTING", "false").lower() == "true"
 
     # Orchestrator Configuration
     ENABLE_WORKFLOW_VISUALIZATION: bool = os.getenv("ENABLE_WORKFLOW_VISUALIZATION", "true").lower() == "true"

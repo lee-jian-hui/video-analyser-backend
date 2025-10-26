@@ -64,6 +64,9 @@ TRANSCRIPTION_AGENT_CAPABILITIES = AgentCapability(
 )
 
 
+logger = get_logger(__name__)
+
+
 @tool
 def video_to_transcript() -> str:
     """Extract audio from video and transcribe to text using Whisper.
@@ -229,7 +232,6 @@ class TranscriptionAgent(BaseAgent):
 
     def _process_task_request(self, state: MessagesState, model_with_tools, tools_by_name, task_request, execution_mode: str, planned_tools: Optional[List[str]] = None) -> MessagesState:
         """Process transcription tasks using TaskRequest model"""
-        logger = get_logger(__name__)
 
         # Extract task information
         task = task_request.task

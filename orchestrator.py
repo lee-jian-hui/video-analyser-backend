@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, Any, List, Literal, Union
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
@@ -20,6 +21,9 @@ class OrchestratorState(TypedDict):
     messages: List[Any]
     llm_calls: int
     task_request: TaskRequest
+    planner_llm_calls: int
+    agent_llm_calls: int
+    chat_llm_calls: int
     
     # FUNCTION CALLING RESULTS
     selected_agents: List[str]
@@ -57,6 +61,26 @@ class MultiStageOrchestrator:
 
         self.workflow = self._build_workflow()
         self.logger.info("MultiStageOrchestrator initialized successfully")
+    
+    def _log_state(self, label: str, state: OrchestratorState):
+        """Debug helper to print orchestrator state snapshot."""
+        if self.logger.isEnabledFor(logging.DEBUG):
+            snapshot = {
+                "label": label,
+                "selected_agents": state.get("selected_agents"),
+                "execution_plans": state.get("execution_plans"),
+                "agent_results_keys": list(state.get("agent_results", {}).keys()),
+                "planner_llm_calls": state.get("planner_llm_calls"),
+                "agent_llm_calls": state.get("agent_llm_calls"),
+                "chat_llm_calls": state.get("chat_llm_calls"),
+                "current_agent_index": state.get("current_agent_index"),
+            }
+            self.logger.debug(f"Orchestrator state: {snapshot}")
+    
+    def _log_next_state(self, label: str, state: OrchestratorState, update: Dict[str, Any]):
+        merged = state.copy()
+        merged.update(update)
+        self._log_state(label, merged)  # type: ignore[arg-type]
 
     def _register_agents(self, agents):
         """Register provided agent instances"""
@@ -109,27 +133,28 @@ class MultiStageOrchestrator:
         available_agents_dict = self.coordinator.get_available_agents()
         task_description = state['task_request'].task.get_task_description()
 
-        # NEW: Try intent-based routing first
-        from routing.intent_classifier import get_intent_classifier
-        classifier = get_intent_classifier()
-        intent_matches = classifier.classify(task_description)
-        min_conf = Config.INTENT_CONFIDENCE_THRESHOLD
+        selected_agents: List[str] = []
+        planner_llm_calls = state.get("planner_llm_calls", 0)
 
-        if intent_matches and intent_matches[0][1] >= min_conf:
-            selected_agents = [agent_name for agent_name, score in intent_matches[:2]]  # Top 2 agents
-            self.logger.info(f"🎯 Intent-based agent selection: '{task_description}'")
-            self.logger.info(f"   → Selected agents: {selected_agents} (scores: {[f'{s:.2f}' for _, s in intent_matches[:2]]})")
-        else:
-            # Fallback to LLM-based selection
-            self.logger.info(f"⚠️  No intent match, using LLM-based selection for: '{task_description}'")
+        if Config.USE_INTENT_ROUTING:
+            from routing.intent_classifier import get_intent_classifier
+            classifier = get_intent_classifier()
+            intent_matches = classifier.classify(task_description)
+            min_conf = Config.INTENT_CONFIDENCE_THRESHOLD
 
-            # Format available agents for template
+            if intent_matches and intent_matches[0][1] >= min_conf:
+                selected_agents = [agent_name for agent_name, score in intent_matches[:2]]
+                self.logger.info(f"🎯 Intent-based agent selection: '{task_description}'")
+                self.logger.info(f"   → Selected agents: {selected_agents} (scores: {[f'{s:.2f}' for _, s in intent_matches[:2]]})")
+
+        if not selected_agents:
+            self.logger.info(f"⚠️  Using LLM-based selection for: '{task_description}'")
+
             available_agents = "\n".join([
                 f"- {name}: {', '.join(capabilities)}"
                 for name, capabilities in available_agents_dict.items()
             ])
 
-            # Use template
             prompt_template = OrchestratorPrompts.AGENT_SELECTOR
             formatted_prompt = prompt_template.format(
                 available_agents=list(available_agents_dict.keys()),
@@ -138,35 +163,35 @@ class MultiStageOrchestrator:
             )
 
             response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
+            planner_llm_calls += 1
 
             try:
-                # Extract JSON from response
                 json_match = re.search(r'\[.*?\]', response.content)
                 if json_match:
                     selected_agents = json.loads(json_match.group())
                 else:
-                    # Fallback: try to parse the entire response
                     selected_agents = json.loads(response.content)
             except:
-                # Fallback: default to vision agent
                 selected_agents = ["vision_agent"]
 
             self.logger.info(f"   → LLM selected agents: {selected_agents}")
 
-        return Command(
-            update={
-                "selected_agents": selected_agents,
-                "function_calling_steps": state.get('function_calling_steps', 0) + 1,
-                "messages": state["messages"] + [
-                    AIMessage(content=f"Selected agents: {selected_agents}")
-                ]
-            },
-            goto="tool_planner"
-        )
+        update = {
+            "selected_agents": selected_agents,
+            "function_calling_steps": state.get('function_calling_steps', 0) + 1,
+            "planner_llm_calls": planner_llm_calls,
+            "messages": state["messages"] + [
+                AIMessage(content=f"Selected agents: {selected_agents}")
+            ]
+        }
+        self._log_next_state("after_agent_selector", state, update)
+        return Command(update=update, goto="tool_planner")
 
     def _tool_planner_node(self, state: OrchestratorState) -> Command[Literal["execute_agent"]]:
         """FUNCTION CALLING: Plan tools for each selected agent"""
         execution_plans = {}
+
+        planner_llm_calls = state.get("planner_llm_calls", 0)
 
         for agent_name in state["selected_agents"]:
             # Get agent's available tools
@@ -200,6 +225,7 @@ class MultiStageOrchestrator:
             self.logger.debug(f"Tool planner prompt: {formatted_prompt}")
 
             response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
+            planner_llm_calls += 1
 
             try:
                 # Extract JSON from response
@@ -214,16 +240,16 @@ class MultiStageOrchestrator:
 
             execution_plans[agent_name] = tools
 
-        return Command(
-            update={
-                "execution_plans": execution_plans,
-                "function_calling_steps": state.get('function_calling_steps', 0) + 1,
-                "messages": state["messages"] + [
-                    AIMessage(content=f"Execution plans: {execution_plans}")
-                ]
-            },
-            goto="execute_agent"
-        )
+        update = {
+            "execution_plans": execution_plans,
+            "function_calling_steps": state.get('function_calling_steps', 0) + 1,
+            "planner_llm_calls": planner_llm_calls,
+            "messages": state["messages"] + [
+                AIMessage(content=f"Execution plans: {execution_plans}")
+            ]
+        }
+        self._log_next_state("after_tool_planner", state, update)
+        return Command(update=update, goto="execute_agent")
 
     def _execute_agent_node(self, state: OrchestratorState) -> Command[Literal["execute_agent", "response_generator"]]:
         """FUNCTION CALLING: Execute current agent with planned tools"""
@@ -253,6 +279,7 @@ class MultiStageOrchestrator:
         # Store result
         agent_results = state["agent_results"].copy()
         agent_results[current_agent_name] = result
+        agent_llm_calls = state.get("agent_llm_calls", 0) + result.get("llm_calls", 0)
         
         new_agent_index = state["current_agent_index"] + 1
         
@@ -262,16 +289,16 @@ class MultiStageOrchestrator:
         else:
             next_step = "response_generator"
 
-        return Command(
-            update={
-                "agent_results": agent_results,
-                "current_agent_index": new_agent_index,
-                "messages": state["messages"] + [
-                    AIMessage(content=f"Executed {current_agent_name}: {result.get('messages', [])}")
-                ]
-            },
-            goto=next_step
-        )
+        update = {
+            "agent_results": agent_results,
+            "current_agent_index": new_agent_index,
+            "agent_llm_calls": agent_llm_calls,
+            "messages": state["messages"] + [
+                AIMessage(content=f"Executed {current_agent_name}: {result.get('messages', [])}")
+            ]
+        }
+        self._log_next_state("after_execute_agent", state, update)
+        return Command(update=update, goto=next_step)
 
 
     def _response_generator_node(self, state: OrchestratorState) -> Command[Literal["final_formatter"]]:
@@ -297,17 +324,18 @@ class MultiStageOrchestrator:
         
         # Use chat LLM for natural conversation
         response = self.chat_model.invoke([HumanMessage(content=prompt)])
-        
-        return Command(
-            update={
-                "chat_response": response.content,
-                "chat_steps": state.get('chat_steps', 0) + 1,
-                "messages": state["messages"] + [
-                    AIMessage(content=f"Generated response: {response.content}")
-                ]
-            },
-            goto="final_formatter"
-        )
+        chat_llm_calls = state.get("chat_llm_calls", 0) + 1
+
+        update = {
+            "chat_response": response.content,
+            "chat_llm_calls": chat_llm_calls,
+            "chat_steps": state.get('chat_steps', 0) + 1,
+            "messages": state["messages"] + [
+                AIMessage(content=f"Generated response: {response.content}")
+            ]
+        }
+        self._log_next_state("after_response_generator", state, update)
+        return Command(update=update, goto="final_formatter")
 
     def _final_formatter_node(self, state: OrchestratorState) -> Dict[str, Any]:
         """CHAT: Final formatting and polish of the response - END node"""
@@ -331,9 +359,11 @@ class MultiStageOrchestrator:
         
         # Use chat LLM for final formatting
         response = self.chat_model.invoke([HumanMessage(content=prompt)])
-        
+        chat_llm_calls = state.get("chat_llm_calls", 0) + 1
+
         return {
             "final_result": response.content,
+            "chat_llm_calls": chat_llm_calls,
             "chat_steps": state.get('chat_steps', 0) + 1,
             "messages": state["messages"] + [
                 AIMessage(content=f"Final formatted result: {response.content}")
@@ -364,6 +394,9 @@ class MultiStageOrchestrator:
             "messages": [HumanMessage(content=task_request.task.description)],
             "llm_calls": 0,
             "task_request": task_request,
+            "planner_llm_calls": 0,
+            "agent_llm_calls": 0,
+            "chat_llm_calls": 0,
 
             # FUNCTION CALLING RESULTS
             "selected_agents": [],
@@ -382,6 +415,13 @@ class MultiStageOrchestrator:
 
         # Run the workflow
         result = self.workflow.invoke(initial_state)
+        self._log_state("final", result)  # type: ignore[arg-type]
+
+        total_llm_calls = (
+            result["planner_llm_calls"]
+            + result["agent_llm_calls"]
+            + result["chat_llm_calls"]
+        )
 
         return {
             "success": True,
@@ -390,5 +430,8 @@ class MultiStageOrchestrator:
             "execution_plans": result["execution_plans"],
             "agent_results": result["agent_results"],
             "final_result": result["final_result"],
-            "total_llm_calls": result["llm_calls"]
+            "planner_llm_calls": result["planner_llm_calls"],
+            "agent_llm_calls": result["agent_llm_calls"],
+            "chat_llm_calls": result["chat_llm_calls"],
+            "total_llm_calls": total_llm_calls
         }
