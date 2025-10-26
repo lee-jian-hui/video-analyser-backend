@@ -198,38 +198,6 @@ class TranscriptionAgent(BaseAgent):
         """Get the model instance for this agent"""
         return self.model
 
-    def _process_with_tools(self, state: MessagesState, model_with_tools, tools_by_name, execution_mode: str, file_path: str = "") -> MessagesState:
-        """Process transcription tasks with tools (legacy method)"""
-        content = state["messages"][-1].content
-
-        prompt = f"""You are a transcription agent with access to these tools:
-        - video_to_transcript: Extract audio from video and transcribe to text
-
-        Task: {content}
-        File path: {file_path}
-
-        Use the video_to_transcript tool to transcribe the audio from the video file.
-        """
-
-        try:
-            response = model_with_tools.invoke([HumanMessage(content=prompt)])
-
-            new_messages = state["messages"] + [
-                AIMessage(content=f"Transcription Agent: {response.content}")
-            ]
-
-            return {
-                "messages": new_messages,
-                "llm_calls": state.get("llm_calls", 0) + 1
-            }
-
-        except Exception as e:
-            error_message = AIMessage(content=f"Transcription Agent Error: {str(e)}")
-            return {
-                "messages": state["messages"] + [error_message],
-                "llm_calls": state.get("llm_calls", 0)
-            }
-
     def _process_task_request(self, state: MessagesState, model_with_tools, tools_by_name, task_request, execution_mode: str, planned_tools: Optional[List[str]] = None) -> MessagesState:
         """Process transcription tasks using TaskRequest model"""
 
@@ -278,10 +246,10 @@ class TranscriptionAgent(BaseAgent):
                         tool_name = tool_call["name"]
                         tool_args = tool_call["args"]
 
-                        # Use the file path from the task if video_path is not provided
-                        if tool_name == "video_to_transcript":
-                            if "video_path" not in tool_args and hasattr(task, 'file_path'):
-                                tool_args["video_path"] = task.file_path
+                        # # Use the file path from the task if video_path is not provided
+                        # if tool_name == "video_to_transcript":
+                        #     if "video_path" not in tool_args and hasattr(task, 'file_path'):
+                        #         tool_args["video_path"] = task.file_path
 
                         logger.debug(f"Calling tool: {tool_name} with args: {tool_args}")
 

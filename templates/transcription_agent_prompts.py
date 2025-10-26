@@ -96,29 +96,3 @@ The full transcript with timestamps has been generated."""
         return cls.SUCCESS_RESPONSE.format(transcript_summary=transcript_summary)
 
 
-class TranscriptAgentExamples:
-    """Example prompts and responses for the transcription agent"""
-
-    VIDEO_TRANSCRIPTION_EXAMPLE = {
-        "task": "Transcribe the video",
-        "expected_tools": ["video_to_transcript"],
-        "sample_response": "I'll transcribe the audio from the video using Whisper."
-    }
-
-    SUBTITLE_GENERATION_EXAMPLE = {
-        "task": "Generate subtitles for the video",
-        "expected_tools": ["video_to_transcript"],
-        "sample_response": "I'll extract and transcribe the audio to generate subtitles."
-    }
-
-    SPEECH_EXTRACTION_EXAMPLE = {
-        "task": "What was said in the video?",
-        "expected_tools": ["video_to_transcript"],
-        "sample_response": "I'll transcribe the spoken content from the video."
-    }
-
-    LANGUAGE_SPECIFIC_EXAMPLE = {
-        "task": "Transcribe the Spanish audio in this video",
-        "expected_tools": ["video_to_transcript"],
-        "sample_response": "I'll transcribe the Spanish audio using Whisper's language detection."
-    }

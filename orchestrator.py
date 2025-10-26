@@ -8,6 +8,7 @@ from llm import get_function_calling_llm, get_chat_llm
 from multi_agent_coordinator import MultiAgentCoordinator
 from models.orchestrator_models import AgentResult, OrchestrationResult
 from models.task_models import TaskRequest, VideoTask, ImageTask, TextTask
+from models.agent_capabilities import AgentCapabilityRegistry
 from templates.orchestrator_prompts import OrchestratorPrompts, PromptExamples
 from utils.logger import get_logger
 from configs import Config
@@ -24,6 +25,8 @@ class OrchestratorState(TypedDict):
     planner_llm_calls: int
     agent_llm_calls: int
     chat_llm_calls: int
+    clarification_active: bool
+    clarification_message: str
     
     # FUNCTION CALLING RESULTS
     selected_agents: List[str]
@@ -74,6 +77,7 @@ class MultiStageOrchestrator:
                 "agent_llm_calls": state.get("agent_llm_calls"),
                 "chat_llm_calls": state.get("chat_llm_calls"),
                 "current_agent_index": state.get("current_agent_index"),
+                "clarification_active": state.get("clarification_active"),
             }
             self.logger.debug(f"Orchestrator state: {snapshot}")
     
@@ -112,21 +116,47 @@ class MultiStageOrchestrator:
             self.logger.error(f"Failed to register default TranscriptionAgent: {e}")
 
     def _build_workflow(self) -> StateGraph:
-        """Build workflow using idiomatic Command pattern"""
+        """Build workflow using Command pattern for dynamic routing"""
         workflow = StateGraph(OrchestratorState)
 
-        # Add all nodes - routing handled by Command pattern
-        workflow.add_node("agent_selector", self._agent_selector_node)      # Structured decision
-        workflow.add_node("tool_planner", self._tool_planner_node)          # Structured planning
-        workflow.add_node("execute_agent", self._execute_agent_node)        # Tool execution
-        workflow.add_node("response_generator", self._response_generator_node)  # Natural language
-        workflow.add_node("final_formatter", self._final_formatter_node)        # User-friendly output
+        # Add all nodes
+        workflow.add_node("agent_selector", self._agent_selector_node)
+        workflow.add_node("tool_planner", self._tool_planner_node)
+        workflow.add_node("execute_agent", self._execute_agent_node)
+        workflow.add_node("clarification_request", self._clarification_node)
+        workflow.add_node("response_generator", self._response_generator_node)
+        workflow.add_node("final_formatter", self._final_formatter_node)
 
-        # Only need start edge - Command pattern handles all routing
+        # Start edge only - Command pattern in each node handles all other routing
+        # This prevents conflicts where multiple edges try to execute simultaneously
         workflow.add_edge(START, "agent_selector")
-        workflow.add_edge("final_formatter", END)
+
+        # All routing is handled by Command.goto() in each node:
+        # - agent_selector: routes to "tool_planner" OR "clarification_request"
+        # - tool_planner: routes to "execute_agent" OR "clarification_request"
+        # - execute_agent: routes to "execute_agent" (loop) OR "response_generator"
+        # - clarification_request: routes to "final_formatter"
+        # - response_generator: routes to "final_formatter"
+        # - final_formatter: is END node (no Command return)
 
         return workflow.compile()
+
+    def _build_capability_summary(self) -> str:
+        capabilities = AgentCapabilityRegistry.get_all_capabilities()
+        if not capabilities:
+            return "- No specialized agents are currently registered."
+
+        lines: List[str] = []
+        for agent_name, capability in capabilities.items():
+            summary = ", ".join(capability.capabilities[:3]) or "No documented capabilities"
+            display_name = agent_name.replace("_", " ").title()
+            lines.append(f"- {display_name}: {summary}")
+
+        return "\n".join(lines)
+
+    def _build_clarification_message(self, user_request: str) -> str:
+        summary = self._build_capability_summary()
+        return OrchestratorPrompts.format_clarification_message(user_request, summary)
 
     def _agent_selector_node(self, state: OrchestratorState) -> Command[Literal["tool_planner"]]:
         """FUNCTION CALLING: Select which agents to use"""
@@ -176,16 +206,22 @@ class MultiStageOrchestrator:
 
             self.logger.info(f"   → LLM selected agents: {selected_agents}")
 
+        clarification_needed = not selected_agents
+        clarification_message = self._build_clarification_message(task_description) if clarification_needed else ""
+
         update = {
             "selected_agents": selected_agents,
             "function_calling_steps": state.get('function_calling_steps', 0) + 1,
             "planner_llm_calls": planner_llm_calls,
+            "clarification_active": clarification_needed,
+            "clarification_message": clarification_message,
             "messages": state["messages"] + [
-                AIMessage(content=f"Selected agents: {selected_agents}")
+                AIMessage(content=f"Selected agents: {selected_agents}" if selected_agents else "No agent matched; requesting clarification.")
             ]
         }
         self._log_next_state("after_agent_selector", state, update)
-        return Command(update=update, goto="tool_planner")
+        next_node = "tool_planner" if selected_agents else "clarification_request"
+        return Command(update=update, goto=next_node)
 
     def _tool_planner_node(self, state: OrchestratorState) -> Command[Literal["execute_agent"]]:
         """FUNCTION CALLING: Plan tools for each selected agent"""
@@ -240,16 +276,27 @@ class MultiStageOrchestrator:
 
             execution_plans[agent_name] = tools
 
+        has_valid_plan = bool(execution_plans) and all(len(tools) > 0 for tools in execution_plans.values())
+        clarification_message = ""
+
+        if not has_valid_plan:
+            clarification_message = self._build_clarification_message(
+                state['task_request'].task.get_task_description()
+            )
+
         update = {
             "execution_plans": execution_plans,
             "function_calling_steps": state.get('function_calling_steps', 0) + 1,
             "planner_llm_calls": planner_llm_calls,
+            "clarification_active": not has_valid_plan,
+            "clarification_message": clarification_message,
             "messages": state["messages"] + [
-                AIMessage(content=f"Execution plans: {execution_plans}")
+                AIMessage(content="Execution plans: {}".format(execution_plans) if has_valid_plan else "No valid tool plan generated; requesting clarification from the user.")
             ]
         }
         self._log_next_state("after_tool_planner", state, update)
-        return Command(update=update, goto="execute_agent")
+        next_node = "execute_agent" if has_valid_plan else "clarification_request"
+        return Command(update=update, goto=next_node)
 
     def _execute_agent_node(self, state: OrchestratorState) -> Command[Literal["execute_agent", "response_generator"]]:
         """FUNCTION CALLING: Execute current agent with planned tools"""
@@ -259,10 +306,7 @@ class MultiStageOrchestrator:
 
         if state["current_agent_index"] >= len(agent_names):
             self.logger.debug("All agents executed, moving to response generation")
-            return Command(
-                update={},
-                goto="response_generator"
-            )
+            return Command(update={}, goto="response_generator")
 
         current_agent_name = agent_names[state["current_agent_index"]]
         planned_tools = state["execution_plans"][current_agent_name]
@@ -274,12 +318,13 @@ class MultiStageOrchestrator:
             agent_name=current_agent_name,
             planned_tools=planned_tools
         )
-        self.logger.debug(f"Agent execution result: {result}")
+        result_dict = result.dict()
+        self.logger.debug(f"Agent execution result: {result_dict}")
 
         # Store result
         agent_results = state["agent_results"].copy()
-        agent_results[current_agent_name] = result
-        agent_llm_calls = state.get("agent_llm_calls", 0) + result.get("llm_calls", 0)
+        agent_results[current_agent_name] = result_dict
+        agent_llm_calls = state.get("agent_llm_calls", 0) + result_dict["llm_calls"]
         
         new_agent_index = state["current_agent_index"] + 1
         
@@ -294,11 +339,26 @@ class MultiStageOrchestrator:
             "current_agent_index": new_agent_index,
             "agent_llm_calls": agent_llm_calls,
             "messages": state["messages"] + [
-                AIMessage(content=f"Executed {current_agent_name}: {result.get('messages', [])}")
+                AIMessage(content=f"Executed {current_agent_name}: {result_dict.get('messages', [])}")
             ]
         }
         self._log_next_state("after_execute_agent", state, update)
-        return Command(update=update, goto=next_step)
+        next_node = "execute_agent" if new_agent_index < len(agent_names) else "response_generator"
+        return Command(update=update, goto=next_node)
+
+
+    def _clarification_node(self, state: OrchestratorState) -> Command[Literal["final_formatter"]]:
+        """Fallback when no agents/tools were selected."""
+        message = state.get("clarification_message") or self._build_clarification_message(
+            state['task_request'].task.get_task_description()
+        )
+        update = {
+            "clarification_active": True,
+            "chat_response": message,
+            "messages": state["messages"] + [AIMessage(content=message)]
+        }
+        self._log_next_state("after_clarification", state, update)
+        return Command(update=update, goto="final_formatter")
 
 
     def _response_generator_node(self, state: OrchestratorState) -> Command[Literal["final_formatter"]]:
@@ -357,7 +417,14 @@ class MultiStageOrchestrator:
         Final response:
         """
         
-        # Use chat LLM for final formatting
+        if state.get("clarification_active"):
+            return {
+                "final_result": chat_response,
+                "chat_llm_calls": state.get("chat_llm_calls", 0),
+                "chat_steps": state.get('chat_steps', 0),
+                "messages": state["messages"]
+            }
+
         response = self.chat_model.invoke([HumanMessage(content=prompt)])
         chat_llm_calls = state.get("chat_llm_calls", 0) + 1
 
@@ -397,6 +464,8 @@ class MultiStageOrchestrator:
             "planner_llm_calls": 0,
             "agent_llm_calls": 0,
             "chat_llm_calls": 0,
+            "clarification_active": False,
+            "clarification_message": "",
 
             # FUNCTION CALLING RESULTS
             "selected_agents": [],

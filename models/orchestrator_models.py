@@ -59,3 +59,14 @@ class AgentCapabilities(BaseModel):
     capabilities: List[str] = Field(default_factory=list, description="List of agent capabilities")
     tools: List[ToolDefinition] = Field(default_factory=list, description="Available tools")
     status: str = Field(default="healthy", description="Agent health status")
+
+
+class AgentProcessResult(BaseModel):
+    success: bool
+    messages: Optional[List[str]] = None
+    agent_used: Optional[str] = None
+    llm_calls: int = 0
+    execution_mode: Optional[str] = None
+    error: Optional[str] = None
+
+

@@ -103,6 +103,29 @@ Plan the optimal order considering dependencies and logical flow.
         else:
             return "Plan and execute a sequence of tools to comprehensively address the task."
 
+    CLARIFICATION_TEMPLATE = """
+I can only help with video-analysis workflows handled by the registered desktop agents.
+
+Your latest request was: "{user_request}"
+
+Available agents and focus areas:
+{capability_summary}
+
+Please rephrase your question so that it clearly maps to one of these capabilities.
+For example:
+- "Detect objects in the uploaded video."
+- "Generate a transcript for my clip."
+- "Summarize what happens in the video I just uploaded."
+"""
+
+    @classmethod
+    def format_clarification_message(cls, user_request: str, capability_summary: str) -> str:
+        summary = capability_summary or "- No agents are currently registered."
+        return cls.CLARIFICATION_TEMPLATE.format(
+            user_request=user_request,
+            capability_summary=summary,
+        )
+
 
 class PromptExamples:
     """Few-shot examples for better LLM performance"""

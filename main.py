@@ -77,47 +77,6 @@ def should_continue(state: MessagesState) -> Literal["tool_node", END]:
     return END
 
 
-
-def old_run():
-    # Initialize model with tools
-    model_with_tools, tools_by_name = initialize_model()
-
-    # Create llm_call function with the model
-    llm_call = create_llm_call(model_with_tools)
-
-    # Create tool_node function with the tools
-    tool_node = create_tool_node(tools_by_name)
-
-    # Build workflow
-    agent_builder = StateGraph(MessagesState)
-
-    # Add nodes
-    agent_builder.add_node("llm_call", llm_call)
-    agent_builder.add_node("tool_node", tool_node)
-
-    # Add edges to connect nodes
-    agent_builder.add_edge(START, "llm_call")
-    agent_builder.add_conditional_edges(
-        "llm_call",
-        should_continue,
-        ["tool_node", END]
-    )
-    agent_builder.add_edge("tool_node", "llm_call")
-
-    # Compile the agent
-    agent = agent_builder.compile()
-
-    # Show the agent
-    display(Image(agent.get_graph(xray=True).draw_mermaid_png()))
-
-    # Invoke
-    from langchain.messages import HumanMessage
-    messages = [HumanMessage(content="Add 3 and 4.")]
-    result = agent.invoke({"messages": messages})
-    for m in result["messages"]:
-        m.pretty_print()
-
-
 def run():
     """New multi-stage orchestration entry point"""
     # Set up debug logging

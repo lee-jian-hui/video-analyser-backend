@@ -1,20 +1,25 @@
 from typing import Dict, Any, List, Optional
+
+from pydantic import BaseModel
 from agents.base_agent import BaseAgent
 from graph import MessagesState
 from langchain.messages import HumanMessage, AIMessage
 from models.task_models import TaskRequest
+from models.orchestrator_models import AgentProcessResult
 from routing.intent_classifier import get_intent_classifier
 from utils.logger import get_logger
+from fallback.base import FallbackStrategy, DefaultFallbackStrategy
 
 
 class MultiAgentCoordinator:
     """Coordinates multiple agents and routes tasks appropriately"""
 
-    def __init__(self):
+    def __init__(self, fallback_strategy: Optional[FallbackStrategy] = None):
         self.agents: Dict[str, BaseAgent] = {}
         self.agent_capabilities: Dict[str, List[str]] = {}
         self.intent_classifier = get_intent_classifier()
         self.logger = get_logger(__name__)
+        self.fallback_strategy = fallback_strategy or DefaultFallbackStrategy()
 
     def register_agent(self, agent: BaseAgent):
         """Register a new agent with the coordinator"""
@@ -44,51 +49,12 @@ class MultiAgentCoordinator:
         self.logger.warning(f"No agent found for task: {task}")
         return None
 
-    def process_request(self, request: Dict[str, Any], execution_mode: str = "single") -> Dict[str, Any]:
-        """
-        Process a request from the frontend through appropriate agents
-
-        Args:
-            request: The task request
-            execution_mode: "single" for one tool, "chain" for sequential tool execution
-        """
-        # Create initial state
-        state = MessagesState(
-            messages=[HumanMessage(content=request.get("content", ""))],
-            llm_calls=0
-        )
-
-        # Route to appropriate agent
-        agent = self.route_task(request)
-        if not agent:
-            return {
-                "success": False,
-                "error": "No agent available to handle this task",
-                "agent_used": None
-            }
-
-        # Process with agent using specified execution mode
-        try:
-            # Pass file_path if available
-            file_path = request.get("file_path", "")
-            result_state = agent.process(state, execution_mode=execution_mode, file_path=file_path)
-            return {
-                "success": True,
-                "messages": [msg.content for msg in result_state["messages"]],
-                "agent_used": agent.name,
-                "llm_calls": result_state.get("llm_calls", 0),
-                "execution_mode": execution_mode
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "agent_used": agent.name
-            }
 
     def get_available_agents(self) -> Dict[str, List[str]]:
         """Get list of available agents and their capabilities"""
         return self.agent_capabilities
+    
+    
     def process_task_request(self, task_request: TaskRequest, agent_name: str = None, planned_tools: List[str] = None) -> Dict[str, Any]:
 
         """
@@ -109,11 +75,11 @@ class MultiAgentCoordinator:
         if agent_name:
             agent = self.agents.get(agent_name)
             if not agent:
-                return {
-                    "success": False,
-                    "error": f"Agent {agent_name} not found",
-                    "agent_used": agent_name
-                }
+                return AgentProcessResult(
+                    success=False,
+                    error=f"Agent {agent_name} not found",
+                    agent_used=agent_name
+                )
         else:
             # NEW: Use intent-based routing from task description
             task_dict = {
@@ -122,11 +88,11 @@ class MultiAgentCoordinator:
             }
             agent = self.route_task(task_dict)
             if not agent:
-                return {
-                    "success": False,
-                    "error": f"No agent available to handle this task. Description: '{task_request.task.description}'",
-                    "agent_used": None
-                }
+                return AgentProcessResult(
+                    success=False,
+                    error=f"No agent available to handle this task. Description: '{task_request.task.description}'",
+                    agent_used=None
+                )
 
         # Process with agent
         try:
@@ -136,19 +102,24 @@ class MultiAgentCoordinator:
                 execution_mode=task_request.execution_mode,
                 planned_tools=planned_tools
             )
-            return {
-                "success": True,
-                "messages": [msg.content for msg in result_state["messages"]],
-                "agent_used": agent.name,
-                "llm_calls": result_state.get("llm_calls", 0),
-                "execution_mode": task_request.execution_mode
-            }
+            result = AgentProcessResult(
+                success=True,
+                messages=[msg.content for msg in result_state["messages"]],
+                agent_used=agent.name,
+                llm_calls=result_state.get("llm_calls", 0),
+                execution_mode=task_request.execution_mode
+            )
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "agent_used": agent.name
-            }
+            result = AgentProcessResult(
+                success=False,
+                error=str(e),
+                agent_used=agent.name
+            )
+
+        if not result.success:
+            return AgentProcessResult(**self.fallback_strategy.handle_failure(result.dict(), task_request.task.description))
+
+        return result
 
     def health_check(self) -> Dict[str, Any]:
         """Health check for all agents"""
@@ -160,3 +131,5 @@ class MultiAgentCoordinator:
             except Exception as e:
                 status[name] = {"status": "unhealthy", "error": str(e)}
         return status
+    
+
