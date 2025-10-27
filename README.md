@@ -149,7 +149,7 @@ sed -i 's/^import video_analyzer_pb2/from protos import video_analyzer_pb2/' pro
 **Old api.proto (deprecated):**
 ```bash
 # Only if you need to regenerate the old proto
-python -m grpc_tools.protoc \
+uv run python -m grpc_tools.protoc \
   -I. \
   --python_out=. \
   --grpc_python_out=. \
