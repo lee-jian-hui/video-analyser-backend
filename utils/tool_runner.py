@@ -28,21 +28,30 @@ def run_tool_in_subprocess(module_path: str, attr_name: str, kwargs: Optional[Di
     ctx = mp.get_context("spawn")
     out_q: mp.Queue = ctx.Queue()  # type: ignore[type-arg]
     proc = ctx.Process(target=_worker, args=(module_path, attr_name, kwargs or {}, out_q))
-    proc.start()
-    proc.join(timeout=timeout_s)
-
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(1)
-        raise TimeoutError(f"Tool {module_path}.{attr_name} timed out after {timeout_s}s")
-
     try:
-        msg = out_q.get_nowait()
-    except Exception:
-        raise RuntimeError(f"Tool {module_path}.{attr_name} failed without output")
+        proc.start()
+        proc.join(timeout=timeout_s)
 
-    if not msg.get("ok"):
-        raise RuntimeError(msg.get("error", "Unknown error"))
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(1)
+            raise TimeoutError(f"Tool {module_path}.{attr_name} timed out after {timeout_s}s")
 
-    return msg.get("result")
+        try:
+            msg = out_q.get_nowait()
+        except Exception:
+            raise RuntimeError(f"Tool {module_path}.{attr_name} failed without output")
 
+        if not msg.get("ok"):
+            raise RuntimeError(msg.get("error", "Unknown error"))
+
+        return msg.get("result")
+    finally:
+        try:
+            out_q.close()
+        except Exception:
+            pass
+        try:
+            out_q.join_thread()
+        except Exception:
+            pass

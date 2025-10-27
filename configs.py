@@ -115,7 +115,7 @@ class Config:
     # Overall call-level timeout (seconds)
     ORCHESTRATION_TOTAL_TIMEOUT_S: float = float(os.getenv("ORCHESTRATION_TOTAL_TIMEOUT_S", "180"))
     # Default per-agent budget if no specific override (seconds)
-    PER_AGENT_DEFAULT_BUDGET_S: float = float(os.getenv("PER_AGENT_DEFAULT_BUDGET_S", "60"))
+    PER_AGENT_DEFAULT_BUDGET_S: float = float(os.getenv("PER_AGENT_DEFAULT_BUDGET_S", "180"))
     # Safety margin reserved for cleanup/formatting (seconds)
     SCHEDULER_SAFETY_MARGIN_S: float = float(os.getenv("SCHEDULER_SAFETY_MARGIN_S", "2"))
     # Optional per-agent overrides via JSON string env var

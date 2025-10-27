@@ -70,6 +70,20 @@ class BaseAgent(ABC):
             if tool_name == "video_to_transcript" and task_file_path and "video_path" not in tool_args:
                 tool_args["video_path"] = task_file_path
 
+            # Provide message content to chat tool if missing
+            if tool_name == "chat_normally" and "message" not in tool_args:
+                try:
+                    tool_args["message"] = task_request.task.get_task_description()
+                except Exception:
+                    tool_args["message"] = ""
+
+            # Provide user_request to reclarify tool if missing
+            if tool_name == "reclarify_prompt" and "user_request" not in tool_args:
+                try:
+                    tool_args["user_request"] = task_request.task.get_task_description()
+                except Exception:
+                    tool_args["user_request"] = ""
+
             # Check remaining time before invoking each tool
             if deadline_ts is not None:
                 remaining = deadline_ts - time.time()

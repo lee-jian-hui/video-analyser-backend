@@ -24,7 +24,7 @@ from context.video_context import get_video_context
 
 # Import orchestrator
 from orchestrator import MultiStageOrchestrator
-from models.task_models import TaskRequest, VideoTask
+from models.task_models import TaskRequest, VideoTask, TextTask
 from services.video_registrar import VideoRegistrar
 
 
@@ -222,13 +222,34 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 full_message = f"[Context from previous conversation: {context_str}]\n\nUser message: {message}"
 
             # Process with multi-agent orchestrator
-            task_request = TaskRequest(
-                task=VideoTask(
-                    description=full_message,
-                    file_path=self.video_context.get_current_video_path() or "",
-                    task_type=None
+            # Choose task model based on availability of a valid video path
+            from pathlib import Path
+            video_path_for_task = self.video_context.get_current_video_path() or ""
+            video_exts = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'}
+            is_video = False
+            if video_path_for_task:
+                try:
+                    is_video = Path(video_path_for_task).suffix.lower() in video_exts
+                except Exception:
+                    is_video = False
+
+            if is_video:
+                task_request = TaskRequest(
+                    task=VideoTask(
+                        description=full_message,
+                        file_path=video_path_for_task,
+                        task_type=None
+                    )
                 )
-            )
+            else:
+                # Fall back to a text task so the orchestrator can clarify and ask user to upload a video
+                task_request = TaskRequest(
+                    task=TextTask(
+                        description=full_message,
+                        content=full_message,
+                        task_type="analysis"
+                    )
+                )
 
             logger.info("🤖 Processing with multi-agent orchestrator...")
             result = self.orchestrator.process_task(task_request)

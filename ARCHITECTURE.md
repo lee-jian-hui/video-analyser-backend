@@ -1,0 +1,4 @@
+- talk about multi agent multi tooling capabilities
+- agent chaining with tool chaining capabilities
+- extendable persistent chat history
+- mermaid diagram of overall backend architecture

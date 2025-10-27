@@ -48,6 +48,23 @@ Respond with ONLY a JSON array of tool names in execution order.
 Example: ["detect_objects_in_video", "extract_text_from_video"]
 """)
 
+    # Tools Needed Gate Template
+    TOOLS_NEEDED_GATE = ChatPromptTemplate.from_template("""
+You are a decision-making assistant determining whether external tools are required.
+
+User request: {user_request}
+
+Decision goal: Should we execute any specialized tools (e.g., vision, transcription), or is a conversational answer sufficient without running tools?
+
+Guidance:
+- If the user asks to analyze, detect, transcribe, extract, generate files, or otherwise process media — prefer tools.
+- If the user asks conceptual questions, follow-ups, clarifications, summaries of known context, or general chat — prefer no tools.
+- If the request is ambiguous or lacks a concrete actionable task, prefer no tools and suggest a clarification.
+
+Respond with ONLY a compact JSON object:
+{{"should_use_tools": true|false, "reason": "one short sentence"}}
+""")
+
     # Result Aggregation Template
     RESULT_AGGREGATOR = ChatPromptTemplate.from_template("""
 You are a result aggregator that combines outputs from multiple AI agents into a comprehensive response.

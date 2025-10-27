@@ -45,6 +45,10 @@ class OrchestratorState(TypedDict):
     
     # DEADLINES
     call_deadline_ts: float     # NEW: Absolute deadline for the whole call (epoch seconds)
+    
+    # TOOLS NEEDED GATE
+    tools_needed: bool          # NEW: Whether to run tools for this request
+    tools_reason: str           # NEW: Short rationale from the model
 
 
 class MultiStageOrchestrator:
@@ -119,12 +123,20 @@ class MultiStageOrchestrator:
         except Exception as e:
             self.logger.error(f"Failed to register default TranscriptionAgent: {e}")
 
+        try:
+            from agents.reclarify_agent import ReclarifyAgent
+            self.coordinator.register_agent(ReclarifyAgent())
+            self.logger.info("Successfully registered default ReclarifyAgent")
+        except Exception as e:
+            self.logger.error(f"Failed to register default ReclarifyAgent: {e}")
+
     def _build_workflow(self) -> StateGraph:
         """Build workflow using Command pattern for dynamic routing"""
         workflow = StateGraph(OrchestratorState)
 
         # Add all nodes
         workflow.add_node("agent_selector", self._agent_selector_node)
+        workflow.add_node("tools_needed_gate", self._tools_needed_gate_node)
         workflow.add_node("tool_planner", self._tool_planner_node)
         workflow.add_node("execute_agent", self._execute_agent_node)
         workflow.add_node("clarification_request", self._clarification_node)
@@ -136,7 +148,7 @@ class MultiStageOrchestrator:
         workflow.add_edge(START, "agent_selector")
 
         # All routing is handled by Command.goto() in each node:
-        # - agent_selector: routes to "tool_planner" OR "clarification_request"
+        # - agent_selector: routes to "tools_needed_gate" OR "clarification_request"
         # - tool_planner: routes to "execute_agent" OR "clarification_request"
         # - execute_agent: routes to "execute_agent" (loop) OR "response_generator"
         # - clarification_request: routes to "final_formatter"
@@ -206,7 +218,7 @@ class MultiStageOrchestrator:
                 else:
                     selected_agents = json.loads(response.content)
             except:
-                selected_agents = ["vision_agent"]
+                selected_agents = ["reclarify_agent"]
 
             self.logger.info(f"   → LLM selected agents: {selected_agents}")
 
@@ -224,7 +236,48 @@ class MultiStageOrchestrator:
             ]
         }
         self._log_next_state("after_agent_selector", state, update)
-        next_node = "tool_planner" if selected_agents else "clarification_request"
+        next_node = "tools_needed_gate" if selected_agents else "clarification_request"
+        return Command(update=update, goto=next_node)
+
+    def _tools_needed_gate_node(self, state: OrchestratorState) -> Command[Literal["tool_planner", "response_generator"]]:
+        """Decide whether to run tools or respond conversationally"""
+        user_request = state['task_request'].task.get_task_description()
+
+        prompt_template = OrchestratorPrompts.TOOLS_NEEDED_GATE
+        formatted_prompt = prompt_template.format(user_request=user_request)
+
+        tools_needed = False
+        reason = "Defaulting to conversation; tool gating parse failed."
+
+        try:
+            response = self.function_calling_model.invoke([HumanMessage(content=formatted_prompt)])
+            import json as _json
+            # Try to extract JSON object
+            m = re.search(r'\{.*\}', response.content, re.DOTALL)
+            raw = m.group(0) if m else response.content
+            data = _json.loads(raw)
+            tools_needed = bool(data.get("should_use_tools", False))
+            reason = str(data.get("reason", "")) or reason
+        except Exception as e:
+            self.logger.info(f"Tools-needed gate parse error; defaulting to chat. Error: {e}")
+
+        # If tools not needed, switch to reclarify agent so we still use a tool path
+        next_selected = state["selected_agents"]
+        if not tools_needed:
+            next_selected = ["reclarify_agent"]
+
+        update = {
+            "tools_needed": tools_needed,
+            "tools_reason": reason,
+            "selected_agents": next_selected,
+            "messages": state["messages"] + [
+                AIMessage(content=f"Tools-needed decision: {tools_needed} ({reason}) → agent(s): {next_selected}")
+            ],
+            "function_calling_steps": state.get('function_calling_steps', 0) + 1,
+        }
+        self._log_next_state("after_tools_needed_gate", state, update)
+
+        next_node = "tool_planner"
         return Command(update=update, goto=next_node)
 
     def _tool_planner_node(self, state: OrchestratorState) -> Command[Literal["execute_agent"]]:
@@ -491,6 +544,8 @@ class MultiStageOrchestrator:
             "clarification_active": False,
             "clarification_message": "",
             "call_deadline_ts": call_deadline_ts,
+            "tools_needed": True,
+            "tools_reason": "",
 
             # FUNCTION CALLING RESULTS
             "selected_agents": [],
