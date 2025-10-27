@@ -111,6 +111,22 @@ class Config:
     ORCHESTRATOR_TIMEOUT: int = int(os.getenv("ORCHESTRATOR_TIMEOUT", "300"))
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))  # Maximum retries for agent selection and planning
 
+    # Orchestration Time Budgets
+    # Overall call-level timeout (seconds)
+    ORCHESTRATION_TOTAL_TIMEOUT_S: float = float(os.getenv("ORCHESTRATION_TOTAL_TIMEOUT_S", "180"))
+    # Default per-agent budget if no specific override (seconds)
+    PER_AGENT_DEFAULT_BUDGET_S: float = float(os.getenv("PER_AGENT_DEFAULT_BUDGET_S", "60"))
+    # Safety margin reserved for cleanup/formatting (seconds)
+    SCHEDULER_SAFETY_MARGIN_S: float = float(os.getenv("SCHEDULER_SAFETY_MARGIN_S", "2"))
+    # Optional per-agent overrides via JSON string env var
+    # Example: '{"vision_agent": 45, "transcription_agent": 120}'
+    _AGENT_BUDGETS_ENV = os.getenv("AGENT_BUDGETS_S_JSON", "")
+    try:
+        import json as _json
+        AGENT_BUDGETS_S = _json.loads(_AGENT_BUDGETS_ENV) if _AGENT_BUDGETS_ENV else {}
+    except Exception:
+        AGENT_BUDGETS_S = {}
+
 
     @classmethod
     def validate(cls) -> bool:

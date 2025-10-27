@@ -55,7 +55,7 @@ class MultiAgentCoordinator:
         return self.agent_capabilities
     
     
-    def process_task_request(self, task_request: TaskRequest, agent_name: str = None, planned_tools: List[str] = None) -> Dict[str, Any]:
+    def process_task_request(self, task_request: TaskRequest, agent_name: str = None, planned_tools: List[str] = None, time_budget_s: float = None) -> Dict[str, Any]:
 
         """
         Process a TaskRequest through the appropriate agent
@@ -100,7 +100,8 @@ class MultiAgentCoordinator:
                 state,
                 task_request,
                 execution_mode=task_request.execution_mode,
-                planned_tools=planned_tools
+                planned_tools=planned_tools,
+                time_budget_s=time_budget_s
             )
             result = AgentProcessResult(
                 success=True,
@@ -132,4 +133,3 @@ class MultiAgentCoordinator:
                 status[name] = {"status": "unhealthy", "error": str(e)}
         return status
     
-

@@ -68,15 +68,17 @@ logger = get_logger(__name__)
 
 
 @tool
-def video_to_transcript() -> str:
+def video_to_transcript(video_path: str = None) -> str:
     """Extract audio from video and transcribe to text using Whisper.
 
     Uses the current video from VideoContext.
     """
     language: str = "en"
     try:
-        video_context = get_video_context()
-        video_path = video_context.get_current_video_path()
+        # Prefer explicit path if provided (supports subprocess execution)
+        if not video_path:
+            video_context = get_video_context()
+            video_path = video_context.get_current_video_path()
 
         if not video_path:
             return "Error: No video loaded in context. Please load a video first."

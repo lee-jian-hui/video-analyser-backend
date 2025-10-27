@@ -13,6 +13,7 @@ from templates.orchestrator_prompts import OrchestratorPrompts, PromptExamples
 from utils.logger import get_logger
 from configs import Config
 from typing_extensions import TypedDict
+import time
 import os
 import json
 import re
@@ -41,6 +42,9 @@ class OrchestratorState(TypedDict):
     # METADATA
     function_calling_steps: int  # NEW: Track function calling usage
     chat_steps: int             # NEW: Track chat usage
+    
+    # DEADLINES
+    call_deadline_ts: float     # NEW: Absolute deadline for the whole call (epoch seconds)
 
 
 class MultiStageOrchestrator:
@@ -312,11 +316,28 @@ class MultiStageOrchestrator:
         planned_tools = state["execution_plans"][current_agent_name]
         self.logger.debug(f"Executing {current_agent_name} with tools: {planned_tools}")
 
-        # Execute through coordinator with the task request
+        # Compute per-agent time budget based on remaining call budget
+        from configs import Config
+        now = time.time()
+        remaining_call_s = max(0.0, state["call_deadline_ts"] - now)
+        safety = max(0.0, Config.SCHEDULER_SAFETY_MARGIN_S)
+
+        if remaining_call_s <= safety:
+            self.logger.info("⏱️  Call deadline nearly reached; skipping remaining agents")
+            return Command(update={}, goto="response_generator")
+
+        agent_default = Config.PER_AGENT_DEFAULT_BUDGET_S
+        per_agent_map = getattr(Config, "AGENT_BUDGETS_S", {}) or {}
+        configured_budget = per_agent_map.get(current_agent_name, agent_default)
+        agent_budget_s = max(0.0, min(configured_budget, max(0.0, remaining_call_s - safety)))
+        self.logger.debug(f"Computed budget for {current_agent_name}: {agent_budget_s:.2f}s (remaining call {remaining_call_s:.2f}s)")
+
+        # Execute through coordinator with the task request and budget
         result = self.coordinator.process_task_request(
             state['task_request'],
             agent_name=current_agent_name,
-            planned_tools=planned_tools
+            planned_tools=planned_tools,
+            time_budget_s=agent_budget_s
         )
         result_dict = result.dict()
         self.logger.debug(f"Agent execution result: {result_dict}")
@@ -457,6 +478,9 @@ class MultiStageOrchestrator:
             video_context.set_current_video(task_request.task.file_path)
             self.logger.info(f"📹 Loaded video into context: {task_request.task.file_path}")
 
+        from configs import Config
+        call_deadline_ts = time.time() + max(0.0, Config.ORCHESTRATION_TOTAL_TIMEOUT_S)
+
         initial_state = {
             "messages": [HumanMessage(content=task_request.task.description)],
             "llm_calls": 0,
@@ -466,6 +490,7 @@ class MultiStageOrchestrator:
             "chat_llm_calls": 0,
             "clarification_active": False,
             "clarification_message": "",
+            "call_deadline_ts": call_deadline_ts,
 
             # FUNCTION CALLING RESULTS
             "selected_agents": [],
