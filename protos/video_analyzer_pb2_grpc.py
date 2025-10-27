@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from protos import video_analyzer_pb2 as video__analyzer__pb2
+from protos import video_analyzer_pb2 as protos_dot_video__analyzer__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in video_analyzer_pb2_grpc.py depends on'
+        + ' but the generated code in protos/video_analyzer_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,23 +36,33 @@ class VideoAnalyzerServiceStub(object):
         """
         self.UploadVideo = channel.stream_unary(
                 '/video_analyzer.VideoAnalyzerService/UploadVideo',
-                request_serializer=video__analyzer__pb2.VideoChunk.SerializeToString,
-                response_deserializer=video__analyzer__pb2.UploadResponse.FromString,
+                request_serializer=protos_dot_video__analyzer__pb2.VideoChunk.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.UploadResponse.FromString,
                 _registered_method=True)
         self.RegisterLocalVideo = channel.unary_unary(
                 '/video_analyzer.VideoAnalyzerService/RegisterLocalVideo',
-                request_serializer=video__analyzer__pb2.RegisterVideoRequest.SerializeToString,
-                response_deserializer=video__analyzer__pb2.RegisterVideoResponse.FromString,
+                request_serializer=protos_dot_video__analyzer__pb2.RegisterVideoRequest.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.RegisterVideoResponse.FromString,
                 _registered_method=True)
         self.SendChatMessage = channel.unary_stream(
                 '/video_analyzer.VideoAnalyzerService/SendChatMessage',
-                request_serializer=video__analyzer__pb2.ChatRequest.SerializeToString,
-                response_deserializer=video__analyzer__pb2.ChatResponse.FromString,
+                request_serializer=protos_dot_video__analyzer__pb2.ChatRequest.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.ChatResponse.FromString,
+                _registered_method=True)
+        self.GetLastSession = channel.unary_unary(
+                '/video_analyzer.VideoAnalyzerService/GetLastSession',
+                request_serializer=protos_dot_video__analyzer__pb2.Empty.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.LastSessionResponse.FromString,
                 _registered_method=True)
         self.GetChatHistory = channel.unary_unary(
                 '/video_analyzer.VideoAnalyzerService/GetChatHistory',
-                request_serializer=video__analyzer__pb2.HistoryRequest.SerializeToString,
-                response_deserializer=video__analyzer__pb2.ChatHistoryResponse.FromString,
+                request_serializer=protos_dot_video__analyzer__pb2.GetHistoryRequest.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.GetChatHistoryResponse.FromString,
+                _registered_method=True)
+        self.ClearChatHistory = channel.unary_unary(
+                '/video_analyzer.VideoAnalyzerService/ClearChatHistory',
+                request_serializer=protos_dot_video__analyzer__pb2.ClearHistoryRequest.SerializeToString,
+                response_deserializer=protos_dot_video__analyzer__pb2.ClearHistoryResponse.FromString,
                 _registered_method=True)
 
 
@@ -80,9 +90,21 @@ class VideoAnalyzerServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetChatHistory(self, request, context):
-        """Phase 4: Chat history (lower priority)
+    def GetLastSession(self, request, context):
+        """Phase 4: Chat history management
         """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetChatHistory(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClearChatHistory(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -92,23 +114,33 @@ def add_VideoAnalyzerServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'UploadVideo': grpc.stream_unary_rpc_method_handler(
                     servicer.UploadVideo,
-                    request_deserializer=video__analyzer__pb2.VideoChunk.FromString,
-                    response_serializer=video__analyzer__pb2.UploadResponse.SerializeToString,
+                    request_deserializer=protos_dot_video__analyzer__pb2.VideoChunk.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.UploadResponse.SerializeToString,
             ),
             'RegisterLocalVideo': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterLocalVideo,
-                    request_deserializer=video__analyzer__pb2.RegisterVideoRequest.FromString,
-                    response_serializer=video__analyzer__pb2.RegisterVideoResponse.SerializeToString,
+                    request_deserializer=protos_dot_video__analyzer__pb2.RegisterVideoRequest.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.RegisterVideoResponse.SerializeToString,
             ),
             'SendChatMessage': grpc.unary_stream_rpc_method_handler(
                     servicer.SendChatMessage,
-                    request_deserializer=video__analyzer__pb2.ChatRequest.FromString,
-                    response_serializer=video__analyzer__pb2.ChatResponse.SerializeToString,
+                    request_deserializer=protos_dot_video__analyzer__pb2.ChatRequest.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.ChatResponse.SerializeToString,
+            ),
+            'GetLastSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLastSession,
+                    request_deserializer=protos_dot_video__analyzer__pb2.Empty.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.LastSessionResponse.SerializeToString,
             ),
             'GetChatHistory': grpc.unary_unary_rpc_method_handler(
                     servicer.GetChatHistory,
-                    request_deserializer=video__analyzer__pb2.HistoryRequest.FromString,
-                    response_serializer=video__analyzer__pb2.ChatHistoryResponse.SerializeToString,
+                    request_deserializer=protos_dot_video__analyzer__pb2.GetHistoryRequest.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.GetChatHistoryResponse.SerializeToString,
+            ),
+            'ClearChatHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearChatHistory,
+                    request_deserializer=protos_dot_video__analyzer__pb2.ClearHistoryRequest.FromString,
+                    response_serializer=protos_dot_video__analyzer__pb2.ClearHistoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -136,8 +168,8 @@ class VideoAnalyzerService(object):
             request_iterator,
             target,
             '/video_analyzer.VideoAnalyzerService/UploadVideo',
-            video__analyzer__pb2.VideoChunk.SerializeToString,
-            video__analyzer__pb2.UploadResponse.FromString,
+            protos_dot_video__analyzer__pb2.VideoChunk.SerializeToString,
+            protos_dot_video__analyzer__pb2.UploadResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -163,8 +195,8 @@ class VideoAnalyzerService(object):
             request,
             target,
             '/video_analyzer.VideoAnalyzerService/RegisterLocalVideo',
-            video__analyzer__pb2.RegisterVideoRequest.SerializeToString,
-            video__analyzer__pb2.RegisterVideoResponse.FromString,
+            protos_dot_video__analyzer__pb2.RegisterVideoRequest.SerializeToString,
+            protos_dot_video__analyzer__pb2.RegisterVideoResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -190,8 +222,35 @@ class VideoAnalyzerService(object):
             request,
             target,
             '/video_analyzer.VideoAnalyzerService/SendChatMessage',
-            video__analyzer__pb2.ChatRequest.SerializeToString,
-            video__analyzer__pb2.ChatResponse.FromString,
+            protos_dot_video__analyzer__pb2.ChatRequest.SerializeToString,
+            protos_dot_video__analyzer__pb2.ChatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLastSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/video_analyzer.VideoAnalyzerService/GetLastSession',
+            protos_dot_video__analyzer__pb2.Empty.SerializeToString,
+            protos_dot_video__analyzer__pb2.LastSessionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -217,8 +276,35 @@ class VideoAnalyzerService(object):
             request,
             target,
             '/video_analyzer.VideoAnalyzerService/GetChatHistory',
-            video__analyzer__pb2.HistoryRequest.SerializeToString,
-            video__analyzer__pb2.ChatHistoryResponse.FromString,
+            protos_dot_video__analyzer__pb2.GetHistoryRequest.SerializeToString,
+            protos_dot_video__analyzer__pb2.GetChatHistoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearChatHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/video_analyzer.VideoAnalyzerService/ClearChatHistory',
+            protos_dot_video__analyzer__pb2.ClearHistoryRequest.SerializeToString,
+            protos_dot_video__analyzer__pb2.ClearHistoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

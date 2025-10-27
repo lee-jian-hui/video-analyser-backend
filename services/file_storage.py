@@ -10,14 +10,15 @@ import uuid
 import logging
 import shutil
 from pathlib import Path
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, Any
 
 from storage_paths import get_videos_dir, get_storage_root
+from services.storage_interface import FileStorageInterface
 
 logger = logging.getLogger(__name__)
 
 
-class FileStorage:
+class FileStorage(FileStorageInterface):
     """Manages video file storage in OS-appropriate directories"""
 
     def __init__(self, base_dir: Optional[str] = None):
@@ -188,7 +189,7 @@ class FileStorage:
         """
         return self.files.copy()
 
-    def get_file_info(self, file_id: str) -> Dict[str, any]:
+    def get_file_info(self, file_id: str) -> Dict[str, Any]:
         """
         Get metadata about a file.
 
@@ -214,7 +215,7 @@ class FileStorage:
             "modified_at": path.stat().st_mtime
         }
 
-    def cleanup_old_files(self, days: int = 7):
+    def cleanup_old_files(self, days: int = 7) -> int:
         """
         Delete files older than specified days.
 

@@ -12,8 +12,10 @@ service VideoAnalyzerService {
   // Phase 3: Chat interface with streaming responses
   rpc SendChatMessage(ChatRequest) returns (stream ChatResponse);
 
-  // Phase 4: Chat history (lower priority)
-  rpc GetChatHistory(HistoryRequest) returns (ChatHistoryResponse);
+  // Phase 4: Chat history management
+  rpc GetLastSession(Empty) returns (LastSessionResponse);
+  rpc GetChatHistory(GetHistoryRequest) returns (GetChatHistoryResponse);
+  rpc ClearChatHistory(ClearHistoryRequest) returns (ClearHistoryResponse);
 }
 
 // File upload messages
@@ -49,6 +51,7 @@ message RegisterVideoResponse {
 message ChatRequest {
   string message = 1;
   string file_id = 2;  // Optional: which video to analyze
+  string context = 3;  // Optional: conversation context from frontend (for session resumption)
 }
 
 message ChatResponse {
@@ -66,16 +69,43 @@ message ChatResponse {
 }
 
 // History messages (Phase 4)
-message HistoryRequest {
-  int32 limit = 1;
+message Empty {}
+
+message LastSessionResponse {
+  bool has_session = 1;
+  string video_id = 2;
+  string video_name = 3;
+  string video_path = 4;
+  int32 message_count = 5;
+  string last_updated = 6;
 }
 
-message ChatHistoryResponse {
-  repeated ChatMessage messages = 1;
+message GetHistoryRequest {
+  string video_id = 1;
+  bool include_full_messages = 2;  // false = summary only, true = include recent messages
+}
+
+message GetChatHistoryResponse {
+  string video_id = 1;
+  string video_name = 2;
+  string conversation_summary = 3;
+  repeated ChatMessage recent_messages = 4;
+  int32 total_messages = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message ClearHistoryRequest {
+  string video_id = 1;
+}
+
+message ClearHistoryResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message ChatMessage {
   string role = 1;
   string content = 2;
-  int64 timestamp = 3;
+  string timestamp = 3;
 }

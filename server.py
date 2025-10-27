@@ -17,6 +17,9 @@ import json
 
 # Import services
 from services.file_storage import FileStorage
+from services.chat_history_storage import get_chat_history_storage
+from services.chat_history_service import ChatHistoryService
+from models.chat_history import ChatHistory
 from context.video_context import get_video_context
 
 # Import orchestrator
@@ -41,6 +44,10 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
 
         # Initialize file storage (OS-appropriate directories)
         self.file_storage = FileStorage()
+
+        # Initialize chat history storage
+        self.chat_storage = get_chat_history_storage()
+        self.chat_history_service = ChatHistoryService(storage=self.chat_storage)
 
         # Initialize video context (singleton)
         self.video_context = get_video_context()
@@ -89,6 +96,13 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
             # Update video context
             self.video_context.set_current_video(file_path)
 
+            # Save as last video in app state
+            self.chat_storage.save_app_state({
+                "last_video_id": file_id,
+                "last_video_path": file_path,
+                "last_video_name": filename
+            })
+
             logger.info(f"✅ Upload successful: {filename} → {file_id}")
             logger.info(f"   Saved to: {file_path}")
 
@@ -116,6 +130,13 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 display_name=request.display_name or None,
                 copy_file=not request.reference_only,
             )
+
+            # Save as last video in app state
+            self.chat_storage.save_app_state({
+                "last_video_id": metadata["file_id"],
+                "last_video_path": metadata["stored_path"],
+                "last_video_name": metadata["display_name"]
+            })
 
             return video_analyzer_pb2.RegisterVideoResponse(
                 file_id=metadata["file_id"],
@@ -146,25 +167,47 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
 
     def SendChatMessage(self, request, context):
         """
-        Handle chat messages with streaming responses (Phase 3).
+        Handle chat messages with streaming responses.
 
-        Processes natural language queries using multi-agent orchestrator.
-        Streams progress updates and final results.
+        Automatically saves messages to chat history.
+        Context can be provided by frontend for session resumption.
         """
         message = request.message
         file_id = request.file_id or None
+        context_str = request.context or ""  # Optional context from frontend
 
         logger.info(f"💬 Chat message: '{message}'")
 
         if file_id:
             logger.info(f"   For video: {file_id}")
+        if context_str:
+            logger.info(f"   With context: {context_str[:100]}...")
 
         try:
-            # If file_id specified, set as current video
+            # Get file path and video info
+            file_path = ""
+            filename = "Unknown"
             if file_id:
                 file_path = self.file_storage.get_file_path(file_id)
                 self.video_context.set_current_video(file_path)
+                filename = file_id  # Could be improved to get actual filename
                 logger.info(f"   Loaded video: {file_path}")
+
+            # Load or create chat history
+            history = self.chat_history_service.load(file_id) if file_id else None
+            if not history and file_id:
+                history = self.chat_history_service.create_new(
+                    video_id=file_id,
+                    video_path=file_path,
+                    display_name=filename
+                )
+                logger.info(f"   Created new chat history for: {file_id}")
+            else:
+                logger.info(f"   Loaded existing history: {history.total_messages} messages")
+
+            # Add user message to history
+            if history:
+                self.chat_history_service.add_message(history, "user", message)
 
             # Yield initial progress update
             yield video_analyzer_pb2.ChatResponse(
@@ -173,11 +216,15 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 agent_name="orchestrator"
             )
 
+            # Build message with context if provided
+            full_message = message
+            if context_str:
+                full_message = f"[Context from previous conversation: {context_str}]\n\nUser message: {message}"
+
             # Process with multi-agent orchestrator
-            # Create TaskRequest for the orchestrator
             task_request = TaskRequest(
                 task=VideoTask(
-                    description=message,
+                    description=full_message,
                     file_path=self.video_context.get_current_video_path() or "",
                     task_type=None
                 )
@@ -190,10 +237,19 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
             logger.info(f"   Agents used: {result.get('selected_agents', [])}")
             logger.info(f"   LLM calls: {result.get('total_llm_calls', 0)}")
 
+            # Get final result
+            final_result = result.get("final_result", "No response generated")
+
+            # Add assistant response to history
+            if history:
+                self.chat_history_service.add_message(history, "assistant", final_result)
+                self.chat_history_service.save(history)
+                logger.info(f"   Saved to history: {history.total_messages} total messages")
+
             # Yield final result
             yield video_analyzer_pb2.ChatResponse(
                 type=video_analyzer_pb2.ChatResponse.RESULT,
-                content=result.get("final_result", "No response generated"),
+                content=final_result,
                 agent_name=", ".join(result.get("selected_agents", [])),
                 result_json=json.dumps({
                     "selected_agents": result.get("selected_agents", []),
@@ -216,17 +272,127 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 content=f"Error: {str(e)}"
             )
 
+    def GetLastSession(self, request, context):
+        """
+        Get information about the last session for resumption prompt.
+
+        Returns session info if available, otherwise has_session=False.
+        """
+        logger.info("📜 GetLastSession called")
+
+        try:
+            # Load app state
+            app_state = self.chat_storage.load_app_state()
+
+            if not app_state or "last_video_id" not in app_state:
+                logger.info("   No previous session found")
+                return video_analyzer_pb2.LastSessionResponse(has_session=False)
+
+            video_id = app_state["last_video_id"]
+            video_name = app_state.get("last_video_name", "Unknown")
+            video_path = app_state.get("last_video_path", "")
+
+            # Load chat history to get message count
+            history = self.chat_history_service.load(video_id)
+            message_count = history.total_messages if history else 0
+            last_updated = history.updated_at if history else app_state.get("last_updated", "")
+
+            logger.info(f"   Found session: {video_name} ({message_count} messages)")
+
+            return video_analyzer_pb2.LastSessionResponse(
+                has_session=True,
+                video_id=video_id,
+                video_name=video_name,
+                video_path=video_path,
+                message_count=message_count,
+                last_updated=last_updated
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error getting last session: {e}", exc_info=True)
+            return video_analyzer_pb2.LastSessionResponse(has_session=False)
+
     def GetChatHistory(self, request, context):
         """
-        Retrieve chat history (Phase 4 - TODO).
+        Retrieve chat history for a specific video.
 
-        Currently returns empty history. Will be implemented
-        with ChatHistoryStore in Phase 4.
+        Can return just summary or include recent messages.
         """
-        logger.info("📜 GetChatHistory called (not yet implemented)")
+        video_id = request.video_id
+        include_messages = request.include_full_messages
 
-        # TODO: Implement ChatHistoryStore in Phase 4
-        return video_analyzer_pb2.ChatHistoryResponse(messages=[])
+        logger.info(f"📜 GetChatHistory called for video: {video_id} (full={include_messages})")
+
+        try:
+            # Load history
+            history = self.chat_history_service.load(video_id)
+
+            if not history:
+                logger.info(f"   No history found for video: {video_id}")
+                return video_analyzer_pb2.GetChatHistoryResponse(
+                    video_id=video_id,
+                    total_messages=0
+                )
+
+            # Build response
+            response = video_analyzer_pb2.GetChatHistoryResponse(
+                video_id=history.video_id,
+                video_name=history.display_name,
+                conversation_summary=history.conversation_summary,
+                total_messages=history.total_messages,
+                created_at=history.created_at,
+                updated_at=history.updated_at
+            )
+
+            # Include recent messages if requested
+            if include_messages:
+                for msg in history.recent_messages:
+                    response.recent_messages.append(
+                        video_analyzer_pb2.ChatMessage(
+                            role=msg.role,
+                            content=msg.content,
+                            timestamp=msg.timestamp
+                        )
+                    )
+
+            logger.info(f"   Returned history: {history.total_messages} total messages, {len(history.recent_messages)} recent")
+            return response
+
+        except Exception as e:
+            logger.error(f"❌ Error retrieving chat history: {e}", exc_info=True)
+            context.set_details(str(e))
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return video_analyzer_pb2.GetChatHistoryResponse(video_id=video_id, total_messages=0)
+
+    def ClearChatHistory(self, request, context):
+        """
+        Clear chat history for a specific video.
+        """
+        video_id = request.video_id
+        logger.info(f"🗑️  ClearChatHistory called for video: {video_id}")
+
+        try:
+            success = self.chat_storage.delete_history(video_id)
+
+            if success:
+                logger.info(f"   ✅ Cleared history for: {video_id}")
+                return video_analyzer_pb2.ClearHistoryResponse(
+                    success=True,
+                    message=f"Chat history cleared for video {video_id}"
+                )
+            else:
+                logger.info(f"   ⚠️  No history found for: {video_id}")
+                return video_analyzer_pb2.ClearHistoryResponse(
+                    success=False,
+                    message=f"No chat history found for video {video_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"❌ Error clearing chat history: {e}", exc_info=True)
+            return video_analyzer_pb2.ClearHistoryResponse(
+                success=False,
+                message=f"Error: {str(e)}"
+            )
 
 
 def serve(port: int = 50051):
