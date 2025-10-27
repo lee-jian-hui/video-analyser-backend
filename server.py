@@ -347,9 +347,12 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
         try:
             # Load history
             history = self.chat_history_service.load(video_id)
+            logger.info(f"history found for video: {video_id}")
+            logger.debug(f"history: {history}")
+
 
             if not history:
-                logger.info(f"   No history found for video: {video_id}")
+                logger.info(f"No history found for video: {video_id}")
                 return video_analyzer_pb2.GetChatHistoryResponse(
                     video_id=video_id,
                     total_messages=0
@@ -364,6 +367,15 @@ class VideoAnalyzerService(video_analyzer_pb2_grpc.VideoAnalyzerServiceServicer)
                 created_at=history.created_at,
                 updated_at=history.updated_at
             )
+
+            # On-demand summary when summary-only requested and none persisted
+            if not include_messages and not history.conversation_summary and history.recent_messages:
+                try:
+                    summary = self.chat_history_service.generate_summary(history, persist=False)
+                    response.conversation_summary = summary or ""
+                    logger.info("Generated on-demand conversation summary for response")
+                except Exception as e:
+                    logger.warning(f"Failed to generate on-demand summary: {e}")
 
             # Include recent messages if requested
             if include_messages:

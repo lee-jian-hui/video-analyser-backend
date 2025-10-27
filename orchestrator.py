@@ -49,6 +49,7 @@ class OrchestratorState(TypedDict):
     # TOOLS NEEDED GATE
     tools_needed: bool          # NEW: Whether to run tools for this request
     tools_reason: str           # NEW: Short rationale from the model
+    reclarify_count: int        # NEW: Count how many times we route to reclarify
 
 
 class MultiStageOrchestrator:
@@ -182,16 +183,34 @@ class MultiStageOrchestrator:
         selected_agents: List[str] = []
         planner_llm_calls = state.get("planner_llm_calls", 0)
 
+        # Detect media prerequisites
+        has_video = False
+        try:
+            file_path = getattr(state['task_request'].task, 'file_path', '')
+            if isinstance(file_path, str):
+                has_video = file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'))
+        except Exception:
+            has_video = False
+
         if Config.USE_INTENT_ROUTING:
             from routing.intent_classifier import get_intent_classifier
             classifier = get_intent_classifier()
             intent_matches = classifier.classify(task_description)
-            min_conf = Config.INTENT_CONFIDENCE_THRESHOLD
+            min_conf = getattr(Config, 'MIN_AGENT_CONF', Config.INTENT_CONFIDENCE_THRESHOLD)
 
             if intent_matches and intent_matches[0][1] >= min_conf:
                 selected_agents = [agent_name for agent_name, score in intent_matches[:2]]
                 self.logger.info(f"🎯 Intent-based agent selection: '{task_description}'")
                 self.logger.info(f"   → Selected agents: {selected_agents} (scores: {[f'{s:.2f}' for _, s in intent_matches[:2]]})")
+
+            # Ambiguity detection: if scores are close or low, prefer reclarify
+            if intent_matches:
+                top = intent_matches[0][1]
+                second = intent_matches[1][1] if len(intent_matches) > 1 else 0.0
+                delta = top - second
+                if top < getattr(Config, 'MIN_AGENT_CONF', 0.55) or delta < getattr(Config, 'AMBIGUITY_DELTA', 0.15):
+                    selected_agents = ["reclarify_agent"]
+                    self.logger.info(f"🤔 Low confidence or ambiguous intent (top={top:.2f}, delta={delta:.2f}); routing to reclarify_agent")
 
         if not selected_agents:
             self.logger.info(f"⚠️  Using LLM-based selection for: '{task_description}'")
@@ -218,9 +237,18 @@ class MultiStageOrchestrator:
                 else:
                     selected_agents = json.loads(response.content)
             except:
+                # Prefer reclarify by default on parse errors
                 selected_agents = ["reclarify_agent"]
 
             self.logger.info(f"   → LLM selected agents: {selected_agents}")
+
+        # Prerequisite gating: if user mentions video/transcribe but no video is loaded
+        text_lower = task_description.lower()
+        mentions_video = any(k in text_lower for k in ["video", "clip", "footage"]) \
+            or any(k in text_lower for k in ["transcribe", "transcription", "speech", "audio"]) 
+        if getattr(Config, 'REQUIRE_VIDEO_FOR_TOOL_REQUEST', True) and mentions_video and not has_video:
+            selected_agents = ["reclarify_agent"]
+            self.logger.info("📎 Video-related request without a loaded video; routing to reclarify_agent")
 
         clarification_needed = not selected_agents
         clarification_message = self._build_clarification_message(task_description) if clarification_needed else ""
@@ -242,11 +270,20 @@ class MultiStageOrchestrator:
     def _tools_needed_gate_node(self, state: OrchestratorState) -> Command[Literal["tool_planner", "response_generator"]]:
         """Decide whether to run tools or respond conversationally"""
         user_request = state['task_request'].task.get_task_description()
+        # Compute video presence
+        has_video = False
+        try:
+            file_path = getattr(state['task_request'].task, 'file_path', '')
+            if isinstance(file_path, str):
+                has_video = file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'))
+        except Exception:
+            has_video = False
 
         prompt_template = OrchestratorPrompts.TOOLS_NEEDED_GATE
-        formatted_prompt = prompt_template.format(user_request=user_request)
+        formatted_prompt = prompt_template.format(user_request=user_request, video_present=str(has_video))
 
         tools_needed = False
+        confidence = 0.0
         reason = "Defaulting to conversation; tool gating parse failed."
 
         try:
@@ -257,21 +294,41 @@ class MultiStageOrchestrator:
             raw = m.group(0) if m else response.content
             data = _json.loads(raw)
             tools_needed = bool(data.get("should_use_tools", False))
+            confidence = float(data.get("confidence", 0.0))
             reason = str(data.get("reason", "")) or reason
         except Exception as e:
             self.logger.info(f"Tools-needed gate parse error; defaulting to chat. Error: {e}")
 
+        # Apply minimum confidence gate
+        if tools_needed and confidence < getattr(Config, 'MIN_TOOLS_CONF', 0.6):
+            self.logger.info(f"Tools-needed gate low confidence ({confidence:.2f}); switching to reclarify_agent")
+            tools_needed = False
+
+        # If video present and user mentions video-like verbs, bias towards tools
+        text_lower = user_request.lower()
+        mentions_video = any(k in text_lower for k in ["video", "clip", "footage", "summarize", "describe", "objects", "main themes"]) \
+            or any(k in text_lower for k in ["transcribe", "transcription", "speech", "audio"]) 
+        if has_video and mentions_video:
+            tools_needed = True
+
         # If tools not needed, switch to reclarify agent so we still use a tool path
         next_selected = state["selected_agents"]
+        reclarify_count = state.get("reclarify_count", 0)
         if not tools_needed:
-            next_selected = ["reclarify_agent"]
+            # Avoid excessive reclarify loops
+            if reclarify_count >= getattr(Config, 'MAX_RECLARIFY_PER_SESSION', 2):
+                tools_needed = True
+            else:
+                next_selected = ["reclarify_agent"]
+                reclarify_count += 1
 
         update = {
             "tools_needed": tools_needed,
             "tools_reason": reason,
             "selected_agents": next_selected,
+            "reclarify_count": reclarify_count,
             "messages": state["messages"] + [
-                AIMessage(content=f"Tools-needed decision: {tools_needed} ({reason}) → agent(s): {next_selected}")
+                AIMessage(content=f"Tools-needed decision: {tools_needed} (conf={confidence:.2f}) {reason} → agent(s): {next_selected}")
             ],
             "function_calling_steps": state.get('function_calling_steps', 0) + 1,
         }
@@ -546,6 +603,7 @@ class MultiStageOrchestrator:
             "call_deadline_ts": call_deadline_ts,
             "tools_needed": True,
             "tools_reason": "",
+            "reclarify_count": 0,
 
             # FUNCTION CALLING RESULTS
             "selected_agents": [],

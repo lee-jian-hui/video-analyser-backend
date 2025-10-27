@@ -66,6 +66,28 @@ class JSONChatHistoryStorage(ChatHistoryStorageInterface):
             logger.error(f"Failed to save chat history for {video_id}: {e}")
             raise
 
+    # Optional utility: prune recent_messages in-place and persist
+    def prune_history_messages(self, video_id: str, max_messages: int) -> bool:
+        """Prune the stored JSON to keep only the last max_messages recent_messages.
+
+        Returns True if pruning occurred and was saved, False otherwise.
+        """
+        try:
+            data = self.load_history(video_id)
+            if not data or "recent_messages" not in data:
+                return False
+            msgs = data.get("recent_messages", [])
+            if max_messages < 0 or len(msgs) <= max_messages:
+                return False
+            data["recent_messages"] = msgs[-max_messages:]
+            data["total_messages"] = len(data["recent_messages"])  # keep aligned
+            self.save_history(video_id, data)
+            logger.info(f"Storage-level prune applied for {video_id}: kept last {max_messages}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to prune history for {video_id}: {e}")
+            return False
+
     def load_history(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
         Load chat history from JSON file.

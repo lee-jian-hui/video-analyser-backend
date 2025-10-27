@@ -92,7 +92,31 @@ class ReclarifyAgent(BaseAgent):
         )
         self.capability_definition = RECLARIFY_AGENT_CAPABILITIES
         self.model = get_llm_model()
-        self.tools = [reclarify_prompt, missing_video, chat_normally]
+        # Additional tools to improve clarification flow
+        @tool
+        def ask_missing_params(user_request: str = "") -> str:
+            """Ask the user targeted follow-up questions to fill missing details (e.g., which analysis, which file)."""
+            model = get_llm_model()
+            prompt = (
+                "You are collecting missing info to execute a video analysis request.\n"
+                f"User request: {user_request}\n"
+                "Ask 2-3 concise questions to clarify the task and any missing inputs (like video, analysis type, output needs)."
+            )
+            resp = model.invoke([HumanMessage(content=prompt)])
+            return resp.content
+
+        @tool
+        def list_supported_actions() -> str:
+            """List supported actions from registered agents in a concise bullet list."""
+            return _capability_summary()
+
+        self.tools = [
+            reclarify_prompt,
+            missing_video,
+            chat_normally,
+            ask_missing_params,
+            list_supported_actions,
+        ]
 
         AgentCapabilityRegistry.register(self.name, self.capability_definition)
 
@@ -106,4 +130,3 @@ class ReclarifyAgent(BaseAgent):
 
     def get_tools(self) -> List[Any]:
         return self.tools
-

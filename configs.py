@@ -127,6 +127,16 @@ class Config:
     except Exception:
         AGENT_BUDGETS_S = {}
 
+    # Clarification / Confidence Gates
+    MIN_AGENT_CONF: float = float(os.getenv("MIN_AGENT_CONF", "0.55"))
+    AMBIGUITY_DELTA: float = float(os.getenv("AMBIGUITY_DELTA", "0.15"))
+    MIN_TOOLS_CONF: float = float(os.getenv("MIN_TOOLS_CONF", "0.60"))
+    REQUIRE_VIDEO_FOR_TOOL_REQUEST: bool = os.getenv("REQUIRE_VIDEO_FOR_TOOL_REQUEST", "true").lower() == "true"
+    MAX_RECLARIFY_PER_SESSION: int = int(os.getenv("MAX_RECLARIFY_PER_SESSION", "2"))
+
+    # Chat history persistence controls
+    CHAT_HISTORY_MAX_SAVED_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_SAVED_MESSAGES", "5"))
+
 
     @classmethod
     def validate(cls) -> bool:

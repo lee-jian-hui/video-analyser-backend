@@ -53,6 +53,7 @@ Example: ["detect_objects_in_video", "extract_text_from_video"]
 You are a decision-making assistant determining whether external tools are required.
 
 User request: {user_request}
+Video present: {video_present}
 
 Decision goal: Should we execute any specialized tools (e.g., vision, transcription), or is a conversational answer sufficient without running tools?
 
@@ -61,8 +62,8 @@ Guidance:
 - If the user asks conceptual questions, follow-ups, clarifications, summaries of known context, or general chat — prefer no tools.
 - If the request is ambiguous or lacks a concrete actionable task, prefer no tools and suggest a clarification.
 
-Respond with ONLY a compact JSON object:
-{{"should_use_tools": true|false, "reason": "one short sentence"}}
+Respond with ONLY a compact JSON object with a confidence measure (0..1):
+{{"should_use_tools": true|false, "confidence": 0.0, "reason": "one short sentence"}}
 """)
 
     # Result Aggregation Template

@@ -84,6 +84,13 @@ class BaseAgent(ABC):
                 except Exception:
                     tool_args["user_request"] = ""
 
+            # Provide user_request for other reclarify tools as needed
+            if tool_name in {"ask_missing_params", "multiple_choice_disambiguation"} and "user_request" not in tool_args:
+                try:
+                    tool_args["user_request"] = task_request.task.get_task_description()
+                except Exception:
+                    tool_args["user_request"] = ""
+
             # Check remaining time before invoking each tool
             if deadline_ts is not None:
                 remaining = deadline_ts - time.time()

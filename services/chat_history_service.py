@@ -115,16 +115,8 @@ class ChatHistoryService:
             for msg in messages
         ])
 
-        prompt = f"""Summarize this conversation excerpt concisely (2-3 sentences):
-
-{messages_text}
-
-Focus on:
-1. What the user asked about
-2. Key findings or results
-3. Any important context
-
-Summary:"""
+        from templates.chat_history_prompts import ChatHistoryPrompts
+        prompt = ChatHistoryPrompts.format_summarize_messages_prompt(messages_text)
 
         try:
             response = llm.invoke([HumanMessage(content=prompt)])
@@ -150,15 +142,8 @@ Summary:"""
 
         llm = get_chat_llm()
 
-        prompt = f"""Merge these two conversation summaries into one concise summary (3-4 sentences max):
-
-Previous summary:
-{old_summary}
-
-New summary:
-{new_summary}
-
-Combined summary:"""
+        from templates.chat_history_prompts import ChatHistoryPrompts
+        prompt = ChatHistoryPrompts.format_merge_summaries_prompt(old_summary, new_summary)
 
         try:
             response = llm.invoke([HumanMessage(content=prompt)])
@@ -201,9 +186,53 @@ Combined summary:"""
             chat_history: ChatHistory instance to save
             storage: Optional custom storage instance (uses instance storage if None)
         """
+        # Enforce configured max saved messages by pruning oldest
+        try:
+            from configs import Config
+            max_saved = max(0, int(getattr(Config, 'CHAT_HISTORY_MAX_SAVED_MESSAGES', 5)))
+        except Exception:
+            max_saved = 5
+
+        if max_saved >= 0 and len(chat_history.recent_messages) > max_saved:
+            # Keep only the last N recent messages
+            pruned_count = len(chat_history.recent_messages) - max_saved
+            chat_history.recent_messages = chat_history.recent_messages[-max_saved:]
+            logger.info(f"Pruned {pruned_count} old messages; saving last {max_saved}")
+            # Align total_messages to saved count for accurate UI reporting
+            chat_history.total_messages = len(chat_history.recent_messages)
+
         storage_to_use = storage or self.storage
         storage_to_use.save_history(chat_history.video_id, chat_history.dict())
         logger.debug(f"Saved chat history for {chat_history.video_id}")
+
+    def generate_summary(self, chat_history: ChatHistory, persist: bool = False, storage: Optional[ChatHistoryStorageInterface] = None) -> str:
+        """
+        Generate a concise summary of the current recent messages.
+
+        Args:
+            chat_history: History to summarize
+            persist: If True, store into conversation_summary and save
+            storage: Optional storage to use when persisting
+
+        Returns:
+            Summary text
+        """
+        if not chat_history.recent_messages:
+            return ""
+
+        summary = self._summarize_messages(chat_history.recent_messages)
+
+        if persist and summary:
+            if chat_history.conversation_summary:
+                chat_history.conversation_summary = self._merge_summaries(
+                    chat_history.conversation_summary,
+                    summary,
+                )
+            else:
+                chat_history.conversation_summary = summary
+            self.save(chat_history, storage=storage)
+
+        return summary
 
     def load(self, video_id: str, storage: Optional[ChatHistoryStorageInterface] = None) -> Optional[ChatHistory]:
         """
@@ -221,7 +250,8 @@ Combined summary:"""
         if data is None:
             return None
 
-        return ChatHistory(**data)
+        history = ChatHistory(**data)
+        return history
 
     def create_new(self, video_id: str, video_path: str, display_name: str = "") -> ChatHistory:
         """

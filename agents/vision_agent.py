@@ -33,6 +33,8 @@ VISION_AGENT_CAPABILITIES = AgentCapability(
         "analyze video", "video analysis",
         "visual", "vision", "image", "frame",
         "appear", "visible", "scene",
+        # Summarization/description phrasing
+        "summarize video", "summarise video", "main themes", "what happens", "describe video", "explain video",
     ],
     categories=[CapabilityCategory.VISION, CapabilityCategory.ANALYSIS],
     example_tasks=[
